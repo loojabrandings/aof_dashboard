@@ -357,11 +357,27 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
 
   // Helper function to get category and item names
   const getCategoryItemNames = (order) => {
-    const category = products.categories.find(cat => cat.id === order.categoryId)
-    const item = category?.items.find(item => item.id === order.itemId)
+    const items = Array.isArray(order.orderItems) && order.orderItems.length > 0
+      ? order.orderItems
+      : [{ categoryId: order.categoryId, itemId: order.itemId, customItemName: order.customItemName, quantity: order.quantity }]
+
+    if (items.length > 1) {
+      const totalQty = items.reduce((sum, it) => sum + (Number(it.quantity) || 0), 0)
+      return {
+        categoryName: 'Multi-Item',
+        itemName: `${items.length} Products`,
+        totalQuantity: totalQty
+      }
+    }
+
+    const first = items[0]
+    const category = products.categories.find(cat => cat.id === first.categoryId)
+    const item = category?.items.find(i => i.id === first.itemId)
+
     return {
       categoryName: category?.name || 'N/A',
-      itemName: order.customItemName || item?.name || 'N/A'
+      itemName: first.customItemName || item?.name || 'N/A',
+      totalQuantity: Number(first.quantity) || Number(order.quantity) || 1
     }
   }
 
@@ -1086,9 +1102,16 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
                           )}
                         </div>
                       </td>
-                      <td>{getCategoryItemNames(order).categoryName}</td>
-                      <td>{getCategoryItemNames(order).itemName}</td>
-                      <td>{order.quantity}</td>
+                      {(() => {
+                        const names = getCategoryItemNames(order)
+                        return (
+                          <>
+                            <td>{names.categoryName}</td>
+                            <td>{names.itemName}</td>
+                            <td>{names.totalQuantity}</td>
+                          </>
+                        )
+                      })()}
                       <td>Rs.{order.totalPrice?.toLocaleString('en-IN') || 0}</td>
                       <td>
                         {editingStatus?.orderId === order.id && editingStatus?.field === 'status' ? (
@@ -1254,7 +1277,7 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
         ) : (
           filteredOrders.map(order => {
             // Helper logic for mobile view
-            const { categoryName, itemName } = getCategoryItemNames(order)
+            const { categoryName, itemName, totalQuantity } = getCategoryItemNames(order)
             const statusColor = getStatusColor(order.status)
             const paymentColor = getPaymentColor(order.paymentStatus)
             const totalPrice = order.totalPrice || order.totalAmount || 0
@@ -1404,7 +1427,7 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
 
                   {/* Item Info */}
                   <div style={{ wordBreak: 'break-word', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
-                    {categoryName} - {itemName} (x{order.quantity || 1})
+                    {categoryName} - {itemName} (x{totalQuantity})
                   </div>
 
                   {/* Pricing Info */}
