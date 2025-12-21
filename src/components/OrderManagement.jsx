@@ -663,27 +663,6 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
       return
     }
 
-    // Get category and item names
-    const { categoryName, itemName } = getCategoryItemNames(order)
-
-    // Calculate order values
-    const totalPrice = order.totalPrice || order.totalAmount || 0
-    const unitPrice = order.unitPrice || 0
-    const quantity = order.quantity || 1
-    const discountType = order.discountType || 'Rs'
-    const discount = order.discount || order.discountValue || 0
-
-    // Calculate final price after discount
-    let discountAmount = 0
-    if (discountType === '%') {
-      discountAmount = (totalPrice * discount) / 100
-    } else {
-      discountAmount = discount || 0
-    }
-
-    const finalPrice = Math.max(0, totalPrice - discountAmount)
-    const codAmount = order.codAmount || Math.max(0, finalPrice + 400)
-
     // Build item details string for template
     const orderItems = Array.isArray(order.orderItems) && order.orderItems.length > 0
       ? order.orderItems
@@ -691,10 +670,28 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
         categoryId: order.categoryId || null,
         itemId: order.itemId || null,
         customItemName: order.customItemName || '',
-        quantity: order.quantity || 1,
-        unitPrice: order.unitPrice || 0,
+        quantity: Number(order.quantity) || 1,
+        unitPrice: Number(order.unitPrice) || 0,
         notes: ''
       }]
+
+    // Calculate subtotal from items
+    const subtotal = orderItems.reduce((sum, it) => sum + (Number(it.quantity) || 0) * (Number(it.unitPrice) || 0), 0)
+
+    // Get financial details
+    const discount = Number(order.discount || order.discountValue || 0)
+    const discountType = order.discountType || 'Rs'
+    const deliveryCharge = Number(order.deliveryCharge ?? 400) || 0
+
+    let discountAmount = 0
+    if (discountType === '%') {
+      discountAmount = (subtotal * discount) / 100
+    } else {
+      discountAmount = discount
+    }
+
+    const finalPrice = Math.max(0, subtotal - discountAmount)
+    const codAmount = order.codAmount || (finalPrice + deliveryCharge)
 
     const itemDetailsString = orderItems.map(it => {
       const c = products.categories.find(cat => cat.id === it.categoryId)
@@ -705,18 +702,19 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
       return `🔸ITEM: ${catName} - ${itName}\n🔸 QTY: ${qty}\n🔸PRICE: Rs. ${price.toFixed(2)}`
     }).join('\n\n')
 
-    const deliveryCharge = Number(order.deliveryCharge ?? 400) || 0
-
-    // Use template from settings or fallback to default
+    // Get category and item names
+    const { categoryName, itemName, totalQuantity } = getCategoryItemNames(order)
     const template = settings?.whatsappTemplates?.quickAction || ''
 
     const message = generateWhatsAppMessage(template, order, {
       itemDetailsString,
-      subtotal: totalPrice, // In single-item compatibility mode this is the subtotal
+      subtotal,
       discountAmount,
       finalPrice,
       deliveryCharge,
-      codAmount
+      codAmount,
+      totalQuantity,
+      totalItems: orderItems.length
     })
 
     if (!message) {

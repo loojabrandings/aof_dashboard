@@ -168,15 +168,15 @@ const ViewOrderModal = ({ order, onClose, onSave, onRequestTrackingNumber, onReq
     }
   }
 
-  // Calculate final price after discount (matching OrderForm logic)
+  // Calculate discount amount based on subtotal (base price before order-level discount)
   let discountAmount = 0
   if (discountType === '%') {
-    discountAmount = (totalPrice * discount) / 100
+    discountAmount = (subtotal * discount) / 100
   } else {
     discountAmount = discount || 0
   }
 
-  const finalPrice = Math.max(0, totalPrice - discountAmount)
+  const finalPrice = Math.max(0, subtotal - discountAmount)
   const codAmount = localOrder.codAmount || Math.max(0, finalPrice + deliveryCharge)
 
   const handleDownloadInvoice = () => {
@@ -392,13 +392,16 @@ const ViewOrderModal = ({ order, onClose, onSave, onRequestTrackingNumber, onReq
     // Use template from settings or fallback to default
     const template = settings?.whatsappTemplates?.viewOrder || ''
 
+    const totalQuantity = orderItems.reduce((sum, it) => sum + (Number(it.quantity) || 0), 0)
     const invoiceMessage = generateWhatsAppMessage(template, safeOrder, {
       itemDetailsString,
       subtotal,
       discountAmount,
       finalPrice,
       deliveryCharge,
-      codAmount
+      codAmount,
+      totalQuantity,
+      totalItems: orderItems.length
     })
 
     if (!invoiceMessage) {
