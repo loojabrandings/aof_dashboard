@@ -413,21 +413,8 @@ const ViewOrderModal = ({ order, onClose, onSave, onRequestTrackingNumber, onReq
 
 
   return (
-    <div className="modal-overlay" onClick={onClose} style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      backgroundColor: 'rgba(0, 0, 0, 0.6)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 1000,
-      padding: '1rem',
-      padding: '1rem',
-      backdropFilter: 'blur(4px)'
-    }}>
+    <div className="modal-overlay" onClick={onClose} style={{ zIndex: 1000 }}>
+      {/* Confirmation Modal Rendered on top of this if needed */}
       <ConfirmationModal
         isOpen={modalConfig.isOpen}
         onClose={closeModal}
@@ -438,206 +425,122 @@ const ViewOrderModal = ({ order, onClose, onSave, onRequestTrackingNumber, onReq
         isAlert={modalConfig.isAlert}
         confirmText={modalConfig.confirmText}
       />
+
       <div
         className="modal-content"
         onClick={(e) => e.stopPropagation()}
         style={{
           maxWidth: '900px',
           width: '100%',
-          maxHeight: '95vh',
-          overflowY: 'auto',
-          backgroundColor: '#1F2937',
-          borderRadius: '8px',
-          boxShadow: '0 20px 60px rgba(0, 0, 0, 0.5)',
+          maxHeight: '90vh',
           display: 'flex',
           flexDirection: 'column',
+          padding: 0, // Reset default padding to handle scroll area properly
+          overflow: 'hidden', // Let the body scroll
           '@media print': {
             boxShadow: 'none',
             borderRadius: 0,
-            maxHeight: 'none'
+            maxHeight: 'none',
+            overflow: 'visible'
           }
         }}
       >
-        {/* Action Buttons - Hidden on Print */}
-        <div style={{
-          padding: '1rem 2rem',
+        {/* Modal Header / Action Bar */}
+        <div className="modal-header" style={{
+          padding: '1rem 1.5rem',
+          borderBottom: '1px solid var(--border-color)',
           display: 'flex',
-          gap: '1rem',
-          borderBottom: '2px solid #374151',
-          backgroundColor: '#111827',
-          '@media print': {
-            display: 'none'
-          }
-        }} className="no-print">
-          <button
-            onClick={handleDownloadInvoice}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              padding: '0.75rem 1.5rem',
-              backgroundColor: '#3B82F6',
-              color: 'white',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontSize: '0.9375rem',
-              fontWeight: 600,
-              transition: 'all 0.2s ease'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = '#2563EB'
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = '#3B82F6'
-            }}
-          >
-            <Download size={18} />
-            Download PDF
-          </button>
-          <button
-            onClick={handleSendInvoiceWhatsApp}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              padding: '0.75rem 1.5rem',
-              backgroundColor: '#25D366',
-              color: 'white',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontSize: '0.9375rem',
-              fontWeight: 600,
-              transition: 'all 0.2s ease',
-              flex: 1
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = '#20BA5A'
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = '#25D366'
-            }}
-          >
-            <MessageCircle size={18} />
-            Send to WhatsApp
-          </button>
-          <button
-            onClick={onClose}
-            style={{
-              padding: '0.75rem 1.5rem',
-              backgroundColor: 'transparent',
-              color: '#6B7280',
-              border: '1px solid #D1D5DB',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontSize: '0.9375rem',
-              fontWeight: 600,
-              transition: 'all 0.2s ease'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = '#F3F4F6'
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'transparent'
-            }}
-          >
-            <X size={18} />
-          </button>
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          backgroundColor: 'var(--bg-secondary)'
+        }}>
+          <div>
+            <h2 className="modal-title" style={{ fontSize: '1.25rem' }}>Order #{safeOrder.id}</h2>
+            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem', fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+              <span>{safeOrder.orderDate}</span>
+              <span>•</span>
+              <span style={{
+                color: safeOrder.status === 'Dispatched' ? 'var(--success)' :
+                  safeOrder.status === 'New Order' ? 'var(--accent-primary)' : 'var(--text-primary)'
+              }}>
+                {safeOrder.status}
+              </span>
+            </div>
+          </div>
+
+          <div className="no-print" style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+            <button
+              onClick={handleDownloadInvoice}
+              className="btn btn-secondary"
+              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+              title="Download PDF Invoice"
+            >
+              <Download size={18} />
+              <span className="hidden-mobile">PDF</span>
+            </button>
+            <button
+              onClick={handleSendInvoiceWhatsApp}
+              className="btn"
+              style={{
+                display: 'flex', alignItems: 'center', gap: '0.5rem',
+                backgroundColor: '#25D366', color: 'white', border: 'none'
+              }}
+              title="Share Invoice via WhatsApp"
+            >
+              <MessageCircle size={18} />
+              <span className="hidden-mobile">WhatsApp</span>
+            </button>
+            <button className="modal-close" onClick={onClose} style={{ marginLeft: '0.5rem' }}>
+              <X size={20} />
+            </button>
+          </div>
         </div>
 
-        {/* Invoice Content */}
+        {/* Scrollable Content Body */}
         <div style={{
-          padding: '3rem',
-          '@media print': {
-            padding: '2rem'
-          }
+          overflowY: 'auto',
+          padding: '2rem',
+          flex: 1,
+          '@media print': { padding: 0, overflow: 'visible' }
         }}>
-          {/* Invoice Header */}
-          <div style={{
+          {/* Invoice Header (Only visible in Print or heavily emphasized in view) */}
+          <div className="print-only" style={{
             textAlign: 'center',
-            borderBottom: '3px solid #FF2E36',
-            paddingBottom: '2rem',
-            marginBottom: '3rem'
+            borderBottom: '2px solid var(--accent-primary)',
+            paddingBottom: '1.5rem',
+            marginBottom: '2rem',
+            display: 'none' // Hidden on screen, shown in print via CSS media query usually, but inline styles are tricky.
+            // Better to keep a simple visual header for screen.
           }}>
-            <h1 style={{
-              fontSize: '2.5rem',
-              fontWeight: 700,
-              color: '#FF2E36',
-              margin: 0,
-              marginBottom: '0.5rem',
-              letterSpacing: '1px'
-            }}>
-              Art Of Frames
-            </h1>
-            <p style={{
-              fontSize: '1rem',
-              color: '#9CA3AF',
-              margin: 0,
-              fontWeight: 500
-            }}>
-              Professional Frame Solutions
-            </p>
+            <h1 style={{ color: 'var(--accent-primary)', fontSize: '2rem', marginBottom: '0.5rem' }}>Art Of Frames</h1>
+            <p style={{ color: 'var(--text-muted)' }}>Professional Frame Solutions</p>
           </div>
 
           {/* Invoice Info & Customer Details */}
           <div style={{
             display: 'grid',
-            gridTemplateColumns: '1fr 1fr',
-            gap: '3rem',
-            marginBottom: '3rem',
-            '@media print': {
-              gridTemplateColumns: '1fr 1fr',
-              gap: '2rem'
-            }
+            gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+            gap: '1.5rem',
+            marginBottom: '2rem'
           }}>
-            {/* Invoice Details */}
-            <div>
-              <h3 style={{
-                fontSize: '1.125rem',
-                fontWeight: 700,
-                color: '#F9FAFB',
-                margin: 0,
-                marginBottom: '1rem',
-                paddingBottom: '0.5rem',
-                borderBottom: '2px solid #374151'
-              }}>
-                INVOICE
+            {/* Order Details Card */}
+            <div className="card" style={{ padding: '1.5rem', height: '100%' }}>
+              <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
+                Order Details
               </h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#9CA3AF', fontWeight: 500 }}>Invoice #:</span>
-                  <span style={{ fontWeight: 600, color: '#F9FAFB' }}>#{safeOrder.id}</span>
-                </div>
-                {safeOrder.createdDate && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#9CA3AF', fontWeight: 500 }}>Created:</span>
-                    <span style={{ fontWeight: 500, color: '#D1D5DB' }}>{safeOrder.createdDate}</span>
-                  </div>
-                )}
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#9CA3AF', fontWeight: 500 }}>Date:</span>
-                  <span style={{ fontWeight: 500, color: '#D1D5DB' }}>{safeOrder.orderDate}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ color: '#9CA3AF', fontWeight: 500 }}>Status:</span>
+                  <span style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>Status:</span>
                   <select
                     value={safeOrder.status}
                     onChange={(e) => handleStatusChange('status', e.target.value)}
+                    className="form-input"
                     style={{
-                      padding: '0.5rem 0.75rem',
-                      borderRadius: '6px',
-                      fontSize: '0.875rem',
-                      fontWeight: 600,
-                      backgroundColor: safeOrder.status === 'Dispatched' ? '#065F46' :
-                        safeOrder.status === 'New Order' ? '#1E40AF' :
-                          safeOrder.status === 'Packed' ? '#92400E' : '#991B1B',
-                      color: safeOrder.status === 'Dispatched' ? '#D1FAE5' :
-                        safeOrder.status === 'New Order' ? '#DBEAFE' :
-                          safeOrder.status === 'Packed' ? '#FEF3C7' : '#FEE2E2',
-                      border: 'none',
-                      cursor: 'pointer',
-                      outline: 'none'
+                      padding: '0.25rem 0.5rem',
+                      fontSize: '0.8rem',
+                      width: 'auto',
+                      backgroundColor: safeOrder.status === 'Dispatched' ? 'var(--success)' : 'var(--bg-input)',
+                      color: safeOrder.status === 'Dispatched' ? '#fff' : 'var(--text-primary)'
                     }}
                   >
                     <option value="New Order">New Order</option>
@@ -648,202 +551,133 @@ const ViewOrderModal = ({ order, onClose, onSave, onRequestTrackingNumber, onReq
                     <option value="Cancelled">Cancelled</option>
                   </select>
                 </div>
-                {safeOrder.status === 'Dispatched' && safeOrder.dispatchDate && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#9CA3AF', fontWeight: 500 }}>Dispatched:</span>
-                    <span style={{ fontWeight: 500, color: '#D1D5DB' }}>{safeOrder.dispatchDate}</span>
-                  </div>
-                )}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ color: '#9CA3AF', fontWeight: 500 }}>Payment Status:</span>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>Payment:</span>
                   <select
                     value={safeOrder.paymentStatus}
                     onChange={(e) => handleStatusChange('paymentStatus', e.target.value)}
+                    className="form-input"
                     style={{
-                      padding: '0.5rem 0.75rem',
-                      borderRadius: '6px',
-                      fontSize: '0.875rem',
-                      fontWeight: 600,
-                      backgroundColor: safeOrder.paymentStatus === 'Paid' ? '#065F46' : '#991B1B',
-                      color: safeOrder.paymentStatus === 'Paid' ? '#D1FAE5' : '#FEE2E2',
-                      border: 'none',
-                      cursor: 'pointer',
-                      outline: 'none'
+                      padding: '0.25rem 0.5rem',
+                      fontSize: '0.8rem',
+                      width: 'auto',
+                      backgroundColor: safeOrder.paymentStatus === 'Paid' ? 'var(--success)' : 'var(--danger)',
+                      color: '#fff'
                     }}
                   >
                     <option value="Pending">Pending</option>
                     <option value="Paid">Paid</option>
                   </select>
                 </div>
-                {safeOrder.trackingNumber && (
+
+                {safeOrder.dispatchDate && (
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#9CA3AF', fontWeight: 500 }}>Tracking:</span>
-                    <span style={{ fontWeight: 600, color: '#F9FAFB' }}>{safeOrder.trackingNumber}</span>
+                    <span style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>Dispatched Date:</span>
+                    <span style={{ color: 'var(--text-primary)' }}>{safeOrder.dispatchDate}</span>
+                  </div>
+                )}
+
+                {safeOrder.trackingNumber && (
+                  <div style={{ marginTop: '0.5rem', padding: '0.75rem', backgroundColor: 'var(--bg-secondary)', borderRadius: 'var(--radius)' }}>
+                    <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem' }}>Tracking Number</label>
+                    <div style={{ fontWeight: 600, color: 'var(--accent-primary)', letterSpacing: '0.5px' }}>{safeOrder.trackingNumber}</div>
                   </div>
                 )}
               </div>
             </div>
 
-            {/* Customer Information */}
-            <div>
-              <h3 style={{
-                fontSize: '1.125rem',
-                fontWeight: 700,
-                color: '#F9FAFB',
-                margin: 0,
-                marginBottom: '1rem',
-                paddingBottom: '0.5rem',
-                borderBottom: '2px solid #374151'
-              }}>
-                BILL TO
+            {/* Customer Details Card */}
+            <div className="card" style={{ padding: '1.5rem', height: '100%' }}>
+              <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
+                Customer Information
               </h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                <div style={{ fontWeight: 600, fontSize: '1.125rem', color: '#F9FAFB', marginBottom: '0.5rem' }}>
+                <div style={{ fontWeight: 600, fontSize: '1.1rem', color: 'var(--text-primary)' }}>
                   {safeOrder.customerName}
                 </div>
+
                 {safeOrder.address && (
-                  <div style={{ color: '#D1D5DB', lineHeight: '1.6' }}>
+                  <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', lineHeight: '1.5', whiteSpace: 'pre-wrap' }}>
                     {safeOrder.address}
                   </div>
                 )}
-                {safeOrder.nearestCity && (
-                  <div style={{ color: '#D1D5DB' }}>
-                    Nearest City: {safeOrder.nearestCity}
-                  </div>
-                )}
-                {safeOrder.district && (
-                  <div style={{ color: '#D1D5DB' }}>
-                    District: {safeOrder.district}
-                  </div>
-                )}
-                {safeOrder.whatsapp && (
-                  <div style={{ color: '#D1D5DB' }}>
-                    WhatsApp: {formatWhatsAppNumber(safeOrder.whatsapp)}
-                  </div>
-                )}
-                {safeOrder.phone && (
-                  <div style={{ color: '#D1D5DB' }}>
-                    Phone: {safeOrder.phone}
-                  </div>
-                )}
+
+                <div style={{ marginTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.9rem' }}>
+                  {(safeOrder.nearestCity || safeOrder.district) && (
+                    <span style={{ color: 'var(--text-muted)' }}>
+                      {safeOrder.nearestCity}{safeOrder.nearestCity && safeOrder.district ? ', ' : ''}{safeOrder.district}
+                    </span>
+                  )}
+
+                  {safeOrder.whatsapp && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--success)' }}>
+                      <MessageCircle size={14} />
+                      <span>{formatWhatsAppNumber(safeOrder.whatsapp)}</span>
+                    </div>
+                  )}
+                  {safeOrder.phone && safeOrder.phone !== safeOrder.whatsapp && (
+                    <div style={{ color: 'var(--text-muted)' }}>Phone: {safeOrder.phone}</div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
 
           {/* Items Table */}
-          <table style={{
-            width: '100%',
-            borderCollapse: 'collapse',
-            marginBottom: '2rem'
-          }}>
-            <thead>
-              <tr style={{
-                backgroundColor: '#111827',
-                borderBottom: '2px solid #374151'
-              }}>
-                <th style={{
-                  padding: '1rem',
-                  textAlign: 'left',
-                  fontWeight: 700,
-                  color: '#F9FAFB',
-                  fontSize: '0.875rem',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px'
+          {/* Items Table */}
+          <div style={{ overflowX: 'auto', marginBottom: '2rem' }}>
+            <table style={{
+              width: '100%',
+              borderCollapse: 'collapse',
+              fontSize: '0.9rem'
+            }}>
+              <thead>
+                <tr style={{
+                  backgroundColor: 'var(--bg-secondary)',
+                  borderBottom: '2px solid var(--border-color)',
+                  color: 'var(--text-muted)'
                 }}>
-                  Description
-                </th>
-                <th style={{
-                  padding: '1rem',
-                  textAlign: 'center',
-                  fontWeight: 700,
-                  color: '#F9FAFB',
-                  fontSize: '0.875rem',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px'
-                }}>
-                  Qty
-                </th>
-                <th style={{
-                  padding: '1rem',
-                  textAlign: 'right',
-                  fontWeight: 700,
-                  color: '#F9FAFB',
-                  fontSize: '0.875rem',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px'
-                }}>
-                  Unit Price
-                </th>
-                <th style={{
-                  padding: '1rem',
-                  textAlign: 'right',
-                  fontWeight: 700,
-                  color: '#F9FAFB',
-                  fontSize: '0.875rem',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px'
-                }}>
-                  Amount
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {orderItems.map((it, idx) => {
-                const catName = getCategoryName(it.categoryId)
-                const itName = getItemName(it.categoryId, it.itemId, it.customItemName)
-                const qty = Number(it.quantity) || 0
-                const price = Number(it.unitPrice) || 0
-                const amount = qty * price
-                const notes = (it.notes || '').toString().trim()
-                return (
-                  <tr key={`${idx}-${it.itemId || it.customItemName || 'item'}`} style={{ borderBottom: '1px solid #374151' }}>
-                    <td style={{
-                      padding: '1.25rem 1rem',
-                      fontWeight: 600,
-                      color: '#F9FAFB',
-                      fontSize: '1rem'
-                    }}>
-                      {catName} - {itName}
-                      {it.image && (
-                        <div style={{ marginTop: '0.5rem' }}>
-                          <a href={it.image} target="_blank" rel="noopener noreferrer">
-                            <img src={it.image} alt="Ref" style={{ height: '60px', borderRadius: '4px', border: '1px solid #374151' }} />
-                          </a>
-                        </div>
-                      )}
-                      {notes && (
-                        <div style={{ marginTop: '0.35rem', color: '#9CA3AF', fontWeight: 500, fontSize: '0.85rem' }}>
-                          Notes: {notes}
-                        </div>
-                      )}
-                    </td>
-                    <td style={{
-                      padding: '1.25rem 1rem',
-                      textAlign: 'center',
-                      color: '#D1D5DB'
-                    }}>
-                      {qty}
-                    </td>
-                    <td style={{
-                      padding: '1.25rem 1rem',
-                      textAlign: 'right',
-                      color: '#D1D5DB'
-                    }}>
-                      Rs. {price.toFixed(2)}
-                    </td>
-                    <td style={{
-                      padding: '1.25rem 1rem',
-                      textAlign: 'right',
-                      fontWeight: 600,
-                      color: '#F9FAFB'
-                    }}>
-                      Rs. {amount.toFixed(2)}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+                  <th style={{ padding: '1rem', textAlign: 'left', fontWeight: 600 }}>DESCRIPTION</th>
+                  <th style={{ padding: '1rem', textAlign: 'center', fontWeight: 600 }}>QTY</th>
+                  <th style={{ padding: '1rem', textAlign: 'right', fontWeight: 600 }}>UNIT PRICE</th>
+                  <th style={{ padding: '1rem', textAlign: 'right', fontWeight: 600 }}>AMOUNT</th>
+                </tr>
+              </thead>
+              <tbody>
+                {orderItems.map((it, idx) => {
+                  const catName = getCategoryName(it.categoryId)
+                  const itName = getItemName(it.categoryId, it.itemId, it.customItemName)
+                  const qty = Number(it.quantity) || 0
+                  const price = Number(it.unitPrice) || 0
+                  const amount = qty * price
+                  const notes = (it.notes || '').toString().trim()
+                  return (
+                    <tr key={`${idx}-${it.itemId || it.customItemName || 'item'}`} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                      <td style={{ padding: '1rem', color: 'var(--text-primary)' }}>
+                        <div style={{ fontWeight: 500 }}>{catName} - {itName}</div>
+                        {it.image && (
+                          <div style={{ marginTop: '0.5rem' }}>
+                            <a href={it.image} target="_blank" rel="noopener noreferrer">
+                              <img src={it.image} alt="Ref" style={{ height: '50px', borderRadius: '4px', border: '1px solid var(--border-color)' }} />
+                            </a>
+                          </div>
+                        )}
+                        {notes && (
+                          <div style={{ marginTop: '0.25rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                            {notes}
+                          </div>
+                        )}
+                      </td>
+                      <td style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-secondary)' }}>{qty}</td>
+                      <td style={{ padding: '1rem', textAlign: 'right', color: 'var(--text-secondary)' }}>Rs. {price.toFixed(2)}</td>
+                      <td style={{ padding: '1rem', textAlign: 'right', fontWeight: 600, color: 'var(--text-primary)' }}>Rs. {amount.toFixed(2)}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
 
           {/* Totals Section */}
           <div style={{
@@ -851,49 +685,29 @@ const ViewOrderModal = ({ order, onClose, onSave, onRequestTrackingNumber, onReq
             justifyContent: 'flex-end',
             marginBottom: '2rem'
           }}>
-            <div style={{
-              width: '300px',
-              borderTop: '2px solid #374151',
-              paddingTop: '1rem'
-            }}>
-              <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                padding: '0.5rem 0',
-                color: '#D1D5DB'
-              }}>
+            <div style={{ width: '300px', padding: '1rem', backgroundColor: 'var(--bg-secondary)', borderRadius: 'var(--radius)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', color: 'var(--text-secondary)' }}>
                 <span>Subtotal:</span>
-                <span style={{ fontWeight: 500, color: '#F9FAFB' }}>Rs. {totalPrice.toFixed(2)}</span>
+                <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>Rs. {totalPrice.toFixed(2)}</span>
               </div>
               {discountAmount > 0 && (
-                <div style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  padding: '0.5rem 0',
-                  color: '#10B981'
-                }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', color: 'var(--success)' }}>
                   <span>Discount ({discountType === '%' ? discount + '%' : 'Rs. ' + discount.toFixed(2)}):</span>
-                  <span style={{ fontWeight: 500 }}>- Rs. {discountAmount.toFixed(2)}</span>
+                  <span>- Rs. {discountAmount.toFixed(2)}</span>
                 </div>
               )}
-              <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                padding: '0.5rem 0',
-                color: '#D1D5DB'
-              }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem', color: 'var(--text-secondary)' }}>
                 <span>Delivery Charge:</span>
-                <span style={{ fontWeight: 500, color: '#F9FAFB' }}>Rs. {deliveryCharge.toFixed(2)}</span>
+                <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>Rs. {deliveryCharge.toFixed(2)}</span>
               </div>
               <div style={{
                 display: 'flex',
                 justifyContent: 'space-between',
-                padding: '1rem 0',
-                marginTop: '0.5rem',
-                borderTop: '2px solid #FF2E36',
-                fontSize: '1.25rem',
+                paddingTop: '0.75rem',
+                borderTop: '1px solid var(--border-color)',
+                fontSize: '1.2rem',
                 fontWeight: 700,
-                color: '#FF2E36'
+                color: 'var(--accent-primary)'
               }}>
                 <span>Total (COD):</span>
                 <span>Rs. {codAmount.toFixed(2)}</span>
@@ -904,49 +718,24 @@ const ViewOrderModal = ({ order, onClose, onSave, onRequestTrackingNumber, onReq
           {/* Notes */}
           {safeOrder.notes && (
             <div style={{
-              marginTop: '2rem',
+              marginBottom: '2rem',
               padding: '1rem',
-              backgroundColor: '#111827',
-              borderRadius: '8px',
-              borderLeft: '4px solid #FF2E36'
+              backgroundColor: 'var(--bg-secondary)',
+              borderRadius: 'var(--radius)',
+              borderLeft: '4px solid var(--accent-primary)'
             }}>
-              <h4 style={{
-                fontSize: '0.875rem',
-                fontWeight: 700,
-                color: '#F9FAFB',
-                margin: 0,
-                marginBottom: '0.5rem',
-                textTransform: 'uppercase',
-                letterSpacing: '0.5px'
-              }}>
-                Notes
+              <h4 style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.5rem', textTransform: 'uppercase' }}>
+                Order Notes
               </h4>
-              <p style={{
-                color: '#D1D5DB',
-                margin: 0,
-                whiteSpace: 'pre-wrap',
-                lineHeight: '1.6'
-              }}>
+              <p style={{ color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', lineHeight: '1.6', fontSize: '0.9rem' }}>
                 {safeOrder.notes}
               </p>
             </div>
           )}
 
-          {/* Footer */}
-          <div style={{
-            marginTop: '3rem',
-            paddingTop: '2rem',
-            borderTop: '1px solid #374151',
-            textAlign: 'center',
-            color: '#9CA3AF',
-            fontSize: '0.875rem'
-          }}>
-            <p style={{ margin: 0, marginBottom: '0.5rem' }}>
-              Thank you for your business!
-            </p>
-            <p style={{ margin: 0, fontWeight: 500 }}>
-              Art Of Frames Management System
-            </p>
+          {/* Simple Footer (Screen Only) */}
+          <div className="no-print" style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.875rem' }}>
+            <p>Viewing Order Details</p>
           </div>
         </div>
       </div>
@@ -954,30 +743,44 @@ const ViewOrderModal = ({ order, onClose, onSave, onRequestTrackingNumber, onReq
       <style>{`
         @media print {
           .modal-overlay {
+            position: absolute; /* Reset fixed */
             background: white !important;
             padding: 0 !important;
+            display: block !important;
           }
           .modal-content {
             box-shadow: none !important;
             border-radius: 0 !important;
             max-height: none !important;
             max-width: 100% !important;
+            height: auto !important;
             background: white !important;
+            padding: 0 !important;
+            overflow: visible !important;
+            display: block !important;
           }
           .no-print {
             display: none !important;
           }
-          /* Print in light mode for better printing */
+          .print-only {
+            display: block !important;
+          }
+          /* Override dark theme for print */
           .modal-content * {
-            color: #1F2937 !important;
-            background: white !important;
+            color: #000 !important;
+            background-color: transparent !important;
+            border-color: #ddd !important;
           }
-          .modal-content th {
-            background: #F9FAFB !important;
-            color: #1F2937 !important;
+          /* Specific overrides for clarity */
+          .modal-content table th {
+            background-color: #f3f4f6 !important;
+            font-weight: bold !important;
           }
-          .modal-content tr {
-            border-color: #E5E7EB !important;
+          /* Hide card backgrounds */
+          .card {
+            border: 1px solid #ddd !important;
+            padding: 10px !important;
+            background: none !important;
           }
         }
       `}</style>
