@@ -178,7 +178,7 @@ const Dashboard = ({ orders, expenses, inventory = [], onNavigate }) => {
   return (
     <div className="dashboard-container">
       <div style={{ marginBottom: '2.5rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+        <div className="header-container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
           <div>
             <h1 style={{
               fontSize: '2.5rem',
@@ -194,7 +194,7 @@ const Dashboard = ({ orders, expenses, inventory = [], onNavigate }) => {
             </p>
           </div>
 
-          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+          <div className="header-actions" style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
             {showDateFilter && (
               <div style={{
                 display: 'flex',

@@ -24,7 +24,8 @@ const Sidebar = ({ activeView, setActiveView, sidebarOpen, setSidebarOpen, onAdd
         style={{
           position: 'fixed',
           top: '1rem',
-          left: '1rem',
+          right: '1rem',
+          left: 'unset',
           zIndex: 101,
           backgroundColor: 'var(--bg-card)',
           border: '1px solid var(--border-color)',

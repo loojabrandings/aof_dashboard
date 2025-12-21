@@ -718,8 +718,8 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
   return (
     <div>
       <div style={{ marginBottom: '2rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-          <div>
+        <div className="header-container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '1rem' }}>
+          <div className="header-title-group">
             <h1 style={{
               fontSize: '2rem',
               fontWeight: 700,
@@ -732,7 +732,7 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
               Manage all customer orders
             </p>
           </div>
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <div className="header-actions" style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
             <button
               className={`btn ${isSelectModeActive ? 'btn-primary' : 'btn-secondary'}`}
               onClick={handleToggleSelectMode}
@@ -987,8 +987,8 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
         )}
       </div>
 
-      {/* Orders Table */}
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+      {/* Orders Table (Desktop) */}
+      <div className="card desktop-view" style={{ padding: 0, overflow: 'hidden' }}>
         {filteredOrders.length === 0 ? (
           <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
             <p>No orders found. Create your first order to get started.</p>
@@ -1244,6 +1244,225 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
           </div>
         )}
       </div>
+
+      {/* Orders List (Mobile) */}
+      <div className="mobile-view" style={{ display: 'none', flexDirection: 'column', gap: '1rem' }}>
+        {filteredOrders.length === 0 ? (
+          <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+            <p>No orders found.</p>
+          </div>
+        ) : (
+          filteredOrders.map(order => {
+            // Helper logic for mobile view
+            const { categoryName, itemName } = getCategoryItemNames(order)
+            const statusColor = getStatusColor(order.status)
+            const paymentColor = getPaymentColor(order.paymentStatus)
+            const totalPrice = order.totalPrice || order.totalAmount || 0
+
+            const matchesStatus = selectMode === 'status' && !manuallyDeselectedOrders.has(order.id) && (
+              (orderStatusSelectFilter === 'all' || order.status === orderStatusSelectFilter) &&
+              (paymentStatusSelectFilter === 'all' || order.paymentStatus === paymentStatusSelectFilter)
+            )
+            const isManuallySelected = selectedOrders.has(order.id)
+            const isSelected = isSelectModeActive && (matchesStatus || isManuallySelected)
+
+            return (
+              <div
+                key={order.id}
+                className="card"
+                style={{
+                  padding: '1rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '1rem',
+                  border: isSelected ? '1px solid var(--accent-primary)' : '1px solid transparent',
+                  backgroundColor: 'var(--bg-card)',
+                  position: 'relative'
+                }}
+                onClick={(e) => handleOrderSelect(order.id, e)}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    {isSelectModeActive && (
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => handleOrderSelect(order.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ width: '1.25rem', height: '1.25rem' }}
+                      />
+                    )}
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <span style={{ fontWeight: 700, color: 'var(--accent-primary)', fontSize: '1.1rem' }}>#{order.id}</span>
+                        {Array.isArray(order.orderItems) && order.orderItems.some(it => it.image) && (
+                          <Paperclip size={14} style={{ color: 'var(--text-muted)' }} />
+                        )}
+                      </div>
+                      <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                        {order.createdDate || order.orderDate}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    {/* Order Status */}
+                    {editingStatus?.orderId === order.id && editingStatus?.field === 'status' ? (
+                      <select
+                        value={order.status}
+                        onChange={(e) => handleStatusChange(order.id, 'status', e.target.value)}
+                        onBlur={() => setEditingStatus(null)}
+                        autoFocus
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          padding: '0.2rem 0.5rem',
+                          borderRadius: '6px',
+                          fontSize: '0.7rem',
+                          fontWeight: 600,
+                          backgroundColor: getStatusColor(order.status),
+                          color: 'white',
+                          border: '1px solid rgba(255,255,255,0.2)',
+                          cursor: 'pointer',
+                          outline: 'none',
+                          boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                        }}
+                      >
+                        <option value="New Order">New Order</option>
+                        <option value="Packed">Packed</option>
+                        <option value="Dispatched">Dispatched</option>
+                        <option value="returned">Returned</option>
+                        <option value="refund">Refund</option>
+                        <option value="cancelled">Cancelled</option>
+                      </select>
+                    ) : (
+                      <span
+                        className="badge"
+                        onClick={(e) => { e.stopPropagation(); handleStatusClick(order.id, 'status', e); }}
+                        style={{
+                          backgroundColor: getStatusColor(order.status),
+                          color: '#fff',
+                          fontSize: '0.7rem',
+                          fontWeight: 600,
+                          padding: '0.25rem 0.5rem',
+                          borderRadius: '6px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        {order.status}
+                      </span>
+                    )}
+
+                    {/* Payment Status */}
+                    {editingStatus?.orderId === order.id && editingStatus?.field === 'paymentStatus' ? (
+                      <select
+                        value={order.paymentStatus}
+                        onChange={(e) => handleStatusChange(order.id, 'paymentStatus', e.target.value)}
+                        onBlur={() => setEditingStatus(null)}
+                        autoFocus
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          padding: '0.2rem 0.5rem',
+                          borderRadius: '6px',
+                          fontSize: '0.7rem',
+                          fontWeight: 600,
+                          backgroundColor: getPaymentColor(order.paymentStatus),
+                          color: 'white',
+                          border: '1px solid rgba(255,255,255,0.2)',
+                          cursor: 'pointer',
+                          outline: 'none',
+                          boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                        }}
+                      >
+                        <option value="Pending">Pending</option>
+                        <option value="Paid">Paid</option>
+                      </select>
+                    ) : (
+                      <span
+                        className="badge"
+                        onClick={(e) => { e.stopPropagation(); handleStatusClick(order.id, 'paymentStatus', e); }}
+                        style={{
+                          backgroundColor: getPaymentColor(order.paymentStatus),
+                          color: '#fff',
+                          fontSize: '0.7rem',
+                          fontWeight: 600,
+                          padding: '0.25rem 0.5rem',
+                          borderRadius: '6px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        {order.paymentStatus}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', padding: '0.75rem 0', borderTop: '1px solid var(--border-color)', borderBottom: '1px solid var(--border-color)' }}>
+                  {/* Customer Info */}
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: '0.95rem', color: 'var(--text-primary)' }}>{order.customerName}</div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>{order.phone || order.whatsapp}</div>
+                  </div>
+
+                  {/* Item Info */}
+                  <div style={{ wordBreak: 'break-word', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+                    {categoryName} - {itemName} (x{order.quantity || 1})
+                  </div>
+
+                  {/* Pricing Info */}
+                  <div style={{ fontWeight: 700, color: 'var(--accent-primary)', fontSize: '1.05rem' }}>
+                    Rs. {totalPrice.toLocaleString()}
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', paddingTop: '0.5rem' }}>
+                  <div className="action-buttons" style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'center' }}>
+                    <button onClick={(e) => { e.stopPropagation(); handleWhatsApp(order); }} className="btn-icon" style={{ background: 'none', color: '#25D366', padding: 0 }}><MessageCircle size={22} /></button>
+                    <button onClick={(e) => { e.stopPropagation(); handleView(order); }} className="btn-icon" style={{ background: 'none', color: 'var(--accent-primary)', padding: 0 }}><Eye size={22} /></button>
+                    <button onClick={(e) => { e.stopPropagation(); handleEdit(order); }} className="btn-icon" style={{ background: 'none', color: 'var(--text-secondary)', padding: 0 }}><Edit size={22} /></button>
+                    <button onClick={(e) => { e.stopPropagation(); handleDeleteOrder(order.id); }} className="btn-icon danger" style={{ background: 'none', color: 'var(--danger)', padding: 0 }}><Trash2 size={22} /></button>
+                  </div>
+                </div>
+              </div>
+            )
+          })
+        )}
+      </div>
+
+      <style>{`
+        @media (max-width: 768px) {
+          .desktop-view {
+            display: none !important;
+          }
+          .mobile-view {
+            display: flex !important;
+          }
+          /* Adjust modal padding for mobile */
+          .modal-content {
+             padding: 1rem !important;
+             max-width: 95vw !important;
+          }
+          .main-content {
+            padding: 0.75rem !important;
+          }
+        }
+        
+        @media (max-width: 400px) {
+          .mobile-view .card {
+            padding: 0.75rem !important;
+          }
+          .action-buttons button {
+            padding: 0.4rem !important;
+          }
+        }
+        
+        @media (min-width: 769px) {
+          .desktop-view {
+            display: block !important;
+          }
+          .mobile-view {
+            display: none !important;
+          }
+        }
+      `}</style>
 
       {showForm && (
         <OrderForm
