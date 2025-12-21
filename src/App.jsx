@@ -194,6 +194,7 @@ function App() {
               setExpenses(data.expenses || [])
             }}
             onUpdateInventory={updateInventory}
+            onLogout={handleLogout}
           />
         )
       default:

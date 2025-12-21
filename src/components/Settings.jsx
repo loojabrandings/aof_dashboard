@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Settings as SettingsIcon, Save, AlertTriangle, Plus, Trash2, Edit2, Edit, Package, Search, ChevronDown, ChevronUp, Download, Upload, Trash, MessageCircle } from 'lucide-react'
+import { Settings as SettingsIcon, Save, AlertTriangle, Plus, Trash2, Edit2, Edit, Package, Search, ChevronDown, ChevronUp, Download, Upload, Trash, MessageCircle, X, LogOut } from 'lucide-react'
 import { generateTrackingNumbersFromRange, getSettings, saveSettings, getOrders, getTrackingNumbers, saveTrackingNumbers, getProducts, getOrderCounter, saveOrderCounter, exportAllData, importAllData, clearAllData } from '../utils/storage'
 import ProductsManagement from './ProductsManagement'
 import ExpenseManagement from './ExpenseManagement'
@@ -9,7 +9,7 @@ import OrderSourcesManagement from './OrderSourcesManagement'
 import ConfirmationModal from './ConfirmationModal'
 import { useToast } from './Toast/ToastContext'
 
-const Settings = ({ orders = [], expenses = [], inventory = [], onDataImported, onUpdateInventory }) => {
+const Settings = ({ orders = [], expenses = [], inventory = [], onDataImported, onUpdateInventory, onLogout }) => {
   const { addToast } = useToast()
   const [activeTab, setActiveTab] = useState('general')
   const [settings, setSettings] = useState({})
@@ -102,22 +102,39 @@ const Settings = ({ orders = [], expenses = [], inventory = [], onDataImported, 
 
   return (
     <div>
-      <div style={{ marginBottom: '2rem' }}>
-        <h1 style={{
-          fontSize: '2rem',
-          fontWeight: 700,
-          color: 'var(--text-primary)',
-          marginBottom: '0.5rem',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.75rem'
-        }}>
-          <SettingsIcon size={32} />
-          Settings
-        </h1>
-        <p style={{ color: 'var(--text-muted)' }}>
-          Configure your application settings
-        </p>
+      <div style={{ marginBottom: '2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <h1 style={{
+            fontSize: '2rem',
+            fontWeight: 700,
+            color: 'var(--text-primary)',
+            marginBottom: '0.5rem',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.75rem'
+          }}>
+            <SettingsIcon size={32} />
+            Settings
+          </h1>
+          <p style={{ color: 'var(--text-muted)' }}>
+            Configure your application settings
+          </p>
+        </div>
+        <button
+          onClick={onLogout}
+          className="btn btn-secondary"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            color: 'var(--text-muted)'
+          }}
+          onMouseEnter={(e) => e.currentTarget.style.color = 'var(--text-primary)'}
+          onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
+        >
+          <LogOut size={18} />
+          Logout
+        </button>
       </div>
 
       {/* Tabs */}

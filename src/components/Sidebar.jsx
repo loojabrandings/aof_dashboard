@@ -268,44 +268,7 @@ const Sidebar = ({ activeView, setActiveView, sidebarOpen, setSidebarOpen, onAdd
           </button>
         </div>
 
-        {/* Logout Button */}
-        <div style={{
-          padding: '0 1.5rem 1.5rem 1.5rem',
-        }}>
-          <button
-            onClick={() => {
-              console.log('Sidebar: Logout button clicked')
-              onLogout()
-            }}
-            style={{
-              width: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.75rem',
-              padding: '0.75rem 1rem',
-              backgroundColor: 'transparent',
-              color: 'var(--danger)',
-              border: '1px solid rgba(239, 68, 68, 0.2)',
-              cursor: 'pointer',
-              transition: 'all 0.2s ease',
-              textAlign: 'left',
-              fontSize: '0.875rem',
-              fontWeight: 500,
-              borderRadius: 'var(--radius)'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.1)'
-              e.currentTarget.style.borderColor = 'var(--danger)'
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'transparent'
-              e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.2)'
-            }}
-          >
-            <X size={20} />
-            <span>Logout</span>
-          </button>
-        </div>
+
       </aside>
 
     </>
