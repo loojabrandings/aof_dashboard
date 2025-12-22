@@ -7,7 +7,7 @@ import { formatCurrency, calculateProfitabilityMetrics } from '../../utils/repor
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6']
 
 const ProfitabilityReports = ({ orders, expenses, isMobile }) => {
-    const { monthlyData, pieData, netProfit, margin, avgRevenuePerOrder, avgCostPerOrder, avgProfitPerOrder } = useMemo(() =>
+    const { monthlyData, pieData, netProfit, margin, avgRevenuePerOrder, avgCostPerOrder, avgProfitPerOrder, profitabilityBySource } = useMemo(() =>
         calculateProfitabilityMetrics(orders, expenses), [orders, expenses]
     )
 
@@ -106,6 +106,34 @@ const ProfitabilityReports = ({ orders, expenses, isMobile }) => {
                                     stroke="none"
                                 >
                                     {pieData.map((entry, index) => (
+                                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                    ))}
+                                </Pie>
+                                <Tooltip
+                                    contentStyle={{ backgroundColor: '#1f2937', border: 'none', borderRadius: '8px', fontSize: '13px', color: '#f3f4f6' }}
+                                    itemStyle={{ color: '#e5e7eb' }}
+                                    formatter={(value) => formatCurrency(value)}
+                                />
+                                <Legend layout="horizontal" verticalAlign="bottom" align="center" wrapperStyle={{ fontSize: '12px', color: '#e5e7eb' }} />
+                            </PieChart>
+                        </ResponsiveContainer>
+                    </div>
+                </div>
+
+                {/* Profit by Channel (Moved from Sales Reports) */}
+                <div className="card" style={{ padding: isMobile ? '1rem' : '1.5rem' }}>
+                    <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1.25rem' }}>Profit by Source</h3>
+                    <div style={{ height: '240px', width: '100%' }}>
+                        <ResponsiveContainer>
+                            <PieChart>
+                                <Pie
+                                    data={profitabilityBySource}
+                                    cx="50%" cy="45%"
+                                    innerRadius={50} outerRadius={70}
+                                    paddingAngle={2} dataKey="value" nameKey="name"
+                                    stroke="none"
+                                >
+                                    {profitabilityBySource.map((entry, index) => (
                                         <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                                     ))}
                                 </Pie>

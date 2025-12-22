@@ -153,45 +153,6 @@ const SalesReports = ({ orders, inventory, expenses, isMobile }) => {
                     </div>
                 </div>
 
-                {/* Profit by Source */}
-                <div className="card" style={{ padding: isMobile ? '1rem' : '1.5rem' }}>
-                    <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1.25rem' }}>Profit by Source</h3>
-                    <div style={{ height: '240px', width: '100%' }}>
-                        <ResponsiveContainer>
-                            <PieChart>
-                                <defs>
-                                    {COLORS.map((color, index) => (
-                                        <linearGradient key={index} id={`profitPieGradient${index}`} x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="0%" stopColor={color} stopOpacity={1} />
-                                            <stop offset="100%" stopColor={color} stopOpacity={0.4} />
-                                        </linearGradient>
-                                    ))}
-                                </defs>
-                                <Pie
-                                    data={metrics.profitabilityData}
-                                    cx="50%"
-                                    cy="45%"
-                                    innerRadius={50}
-                                    outerRadius={70}
-                                    paddingAngle={5}
-                                    dataKey="profit"
-                                    nameKey="name"
-                                    stroke="none"
-                                >
-                                    {metrics.profitabilityData.map((entry, index) => (
-                                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                                    ))}
-                                </Pie>
-                                <Tooltip
-                                    contentStyle={{ backgroundColor: '#1f2937', border: 'none', borderRadius: '8px', fontSize: '13px', color: '#f3f4f6' }}
-                                    itemStyle={{ color: '#e5e7eb' }}
-                                    formatter={(value) => formatCurrency(value)}
-                                />
-                                <Legend wrapperStyle={{ fontSize: '12px', color: '#9ca3af' }} />
-                            </PieChart>
-                        </ResponsiveContainer>
-                    </div>
-                </div>
             </div>
 
             {/* Top Products */}

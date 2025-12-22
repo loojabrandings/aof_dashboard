@@ -1,11 +1,13 @@
 import { useMemo } from 'react'
 import {
-    BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
+    BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend
 } from 'recharts'
 import { formatCurrency, calculateExpenseMetrics } from '../../utils/reportUtils'
 
-const ExpenseReports = ({ expenses, isMobile }) => {
-    const metrics = useMemo(() => calculateExpenseMetrics(expenses), [expenses])
+const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4']
+
+const ExpenseReports = ({ expenses, orders, isMobile }) => {
+    const metrics = useMemo(() => calculateExpenseMetrics(expenses, orders), [expenses, orders])
 
     const trendData = useMemo(() => {
         const grouped = {}
@@ -23,30 +25,98 @@ const ExpenseReports = ({ expenses, isMobile }) => {
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? '1rem' : '1.5rem' }}>
-            <div className="card" style={{ padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                <h3 style={{ fontSize: '0.8rem', fontWeight: 500, color: 'var(--text-muted)' }}>Total Expenses Recorded</h3>
-                <p style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--danger)' }}>{formatCurrency(metrics.total)}</p>
+            <style>{`
+                .expense-stats-grid {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
+                    gap: 1rem;
+                }
+                .expense-charts-row {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr));
+                    gap: 1.5rem;
+                }
+                .expense-table {
+                    width: 100%;
+                    border-collapse: collapse;
+                    font-size: 0.875rem;
+                }
+                .expense-table th {
+                    text-align: left;
+                    padding: 0.75rem 1rem;
+                    color: var(--text-muted);
+                    font-weight: 500;
+                    border-bottom: 1px solid var(--border-color);
+                }
+                .expense-table td {
+                    padding: 0.75rem 1rem;
+                    border-bottom: 1px solid var(--border-color);
+                }
+                @media (max-width: 768px) {
+                    .expense-stats-grid { grid-template-columns: 1fr; }
+                    .expense-charts-row { grid-template-columns: 1fr; }
+                }
+            `}</style>
+
+            {/* Top Row: Summary Cards */}
+            <div className="expense-stats-grid">
+                <div className="card" style={{ padding: '1rem' }}>
+                    <h3 style={{ fontSize: '0.8rem', fontWeight: 500, color: 'var(--text-muted)' }}>Total Expenses</h3>
+                    <p style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--error)' }}>{formatCurrency(metrics.total)}</p>
+                </div>
+                <div className="card" style={{ padding: '1rem' }}>
+                    <h3 style={{ fontSize: '0.8rem', fontWeight: 500, color: 'var(--text-muted)' }}>Top Category Spend</h3>
+                    <p style={{ fontSize: '1.15rem', fontWeight: 700 }}>{metrics.topCategory.name}</p>
+                    <p style={{ fontSize: '0.875rem', color: 'var(--error)' }}>{formatCurrency(metrics.topCategory.value)}</p>
+                </div>
+                <div className="card" style={{ padding: '1rem' }}>
+                    <h3 style={{ fontSize: '0.8rem', fontWeight: 500, color: 'var(--text-muted)' }}>Expense vs. Sales Ratio</h3>
+                    <p style={{ fontSize: '1.25rem', fontWeight: 700, color: metrics.expenseSalesRatio > 25 ? 'var(--error)' : 'var(--success)' }}>
+                        {metrics.expenseSalesRatio.toFixed(1)}%
+                    </p>
+                    <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>of Revenue</p>
+                </div>
             </div>
 
-            <div style={{
-                display: 'grid',
-                gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(min(100%, 400px), 1fr))',
-                gap: '1.5rem',
-                width: '100%'
-            }}>
-                {/* Category Breakdown */}
+            <div className="expense-charts-row">
+                {/* Categorized Breakdown Pie */}
+                <div className="card" style={{ padding: isMobile ? '1rem' : '1.5rem' }}>
+                    <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1.25rem' }}>Spend Distribution</h3>
+                    <div style={{ height: '260px', width: '100%' }}>
+                        <ResponsiveContainer>
+                            <PieChart>
+                                <Pie
+                                    data={metrics.categoryData}
+                                    cx="50%" cy="45%"
+                                    innerRadius={55} outerRadius={80}
+                                    paddingAngle={3} dataKey="value" stroke="none"
+                                >
+                                    {metrics.categoryData.map((entry, index) => (
+                                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                    ))}
+                                </Pie>
+                                <Tooltip
+                                    contentStyle={{ backgroundColor: '#1f2937', border: 'none', borderRadius: '8px', fontSize: '13px', color: '#f3f4f6' }}
+                                    formatter={(value) => formatCurrency(value)}
+                                />
+                                <Legend wrapperStyle={{ fontSize: '12px' }} />
+                            </PieChart>
+                        </ResponsiveContainer>
+                    </div>
+                </div>
+
+                {/* Category Breakdown Bar - Existing Logic */}
                 <div className="card" style={{ padding: isMobile ? '1rem' : '1.5rem' }}>
                     <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1.25rem' }}>Expenses by Category</h3>
-                    <div style={{ height: '220px', width: '100%' }}>
+                    <div style={{ height: '260px', width: '100%' }}>
                         <ResponsiveContainer>
                             <BarChart data={metrics.categoryData} layout="vertical" margin={{ left: -10, right: 10 }}>
                                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
-                                <XAxis type="number" stroke="#e5e7eb" fontSize={14} tickLine={false} axisLine={false} />
-                                <YAxis dataKey="name" type="category" width={80} stroke="#e5e7eb" fontSize={14} tickLine={false} axisLine={false} />
+                                <XAxis type="number" stroke="#e5e7eb" fontSize={12} tickLine={false} axisLine={false} />
+                                <YAxis dataKey="name" type="category" width={80} stroke="#e5e7eb" fontSize={12} tickLine={false} axisLine={false} />
                                 <Tooltip
                                     contentStyle={{ backgroundColor: '#1f2937', border: 'none', borderRadius: '8px', fontSize: '13px', color: '#f3f4f6' }}
                                     itemStyle={{ color: '#e5e7eb' }}
-                                    labelStyle={{ color: '#9ca3af', marginBottom: '0.25rem' }}
                                     formatter={(value) => formatCurrency(value)}
                                 />
                                 <Bar dataKey="value" fill="#ef4444" radius={[0, 4, 4, 0]} barSize={20} />
@@ -54,26 +124,64 @@ const ExpenseReports = ({ expenses, isMobile }) => {
                         </ResponsiveContainer>
                     </div>
                 </div>
+            </div>
 
-                {/* Monthly Trend */}
-                <div className="card" style={{ padding: isMobile ? '1rem' : '1.5rem' }}>
-                    <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1.25rem' }}>Monthly Expense Trend</h3>
-                    <div style={{ height: '220px', width: '100%' }}>
-                        <ResponsiveContainer>
-                            <BarChart data={trendData} margin={{ left: -20 }}>
-                                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
-                                <XAxis dataKey="date" stroke="#e5e7eb" fontSize={14} tickLine={false} axisLine={false} />
-                                <YAxis stroke="#e5e7eb" fontSize={14} tickLine={false} axisLine={false} tickFormatter={(val) => `${val / 1000}k`} />
-                                <Tooltip
-                                    contentStyle={{ backgroundColor: '#1f2937', border: 'none', borderRadius: '8px', fontSize: '13px', color: '#f3f4f6' }}
-                                    itemStyle={{ color: '#e5e7eb' }}
-                                    labelStyle={{ color: '#9ca3af', marginBottom: '0.25rem' }}
-                                    formatter={(value) => formatCurrency(value)}
-                                />
-                                <Bar dataKey="amount" fill="#ef4444" radius={[4, 4, 0, 0]} barSize={20} />
-                            </BarChart>
-                        </ResponsiveContainer>
-                    </div>
+            {/* Monthly Trend */}
+            <div className="card" style={{ padding: isMobile ? '1rem' : '1.5rem' }}>
+                <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1.25rem' }}>Monthly Expense Trend</h3>
+                <div style={{ height: '220px', width: '100%' }}>
+                    <ResponsiveContainer>
+                        <BarChart data={trendData} margin={{ left: -20 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+                            <XAxis dataKey="date" stroke="#e5e7eb" fontSize={12} tickLine={false} axisLine={false} />
+                            <YAxis stroke="#e5e7eb" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(val) => `${val / 1000}k`} />
+                            <Tooltip
+                                contentStyle={{ backgroundColor: '#1f2937', border: 'none', borderRadius: '8px', fontSize: '13px', color: '#f3f4f6' }}
+                                itemStyle={{ color: '#e5e7eb' }}
+                                formatter={(value) => formatCurrency(value)}
+                            />
+                            <Bar dataKey="amount" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={24} />
+                        </BarChart>
+                    </ResponsiveContainer>
+                </div>
+            </div>
+
+            {/* Top Spending Items Table */}
+            <div className="card" style={{ padding: '0', overflow: 'hidden' }}>
+                <div style={{ padding: '1rem 1.5rem', borderBottom: '1px solid var(--border-color)' }}>
+                    <h3 style={{ fontSize: '1rem', fontWeight: 700 }}>Top Spending Items</h3>
+                </div>
+                <div style={{ overflowX: 'auto' }}>
+                    <table className="expense-table">
+                        <thead>
+                            <tr>
+                                <th>Item / Description</th>
+                                <th>Category</th>
+                                <th style={{ textAlign: 'right' }}>Total Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {metrics.topItems.map((item, idx) => (
+                                <tr key={idx}>
+                                    <td style={{ fontWeight: 500 }}>{item.name}</td>
+                                    <td>
+                                        <span style={{
+                                            fontSize: '0.7rem',
+                                            padding: '0.2rem 0.6rem',
+                                            background: 'rgba(255,255,255,0.05)',
+                                            borderRadius: '12px',
+                                            border: '1px solid rgba(255,255,255,0.1)'
+                                        }}>
+                                            {item.category}
+                                        </span>
+                                    </td>
+                                    <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--error)' }}>
+                                        {formatCurrency(item.amount)}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>
