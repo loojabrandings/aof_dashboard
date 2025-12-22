@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { X, Download, MessageCircle } from 'lucide-react'
+import { X, Download, MessageCircle, Star } from 'lucide-react'
 import { getProducts, getSettings } from '../utils/storage'
 import { formatWhatsAppNumber, generateWhatsAppMessage } from '../utils/whatsapp'
 import TrackingNumberModal from './TrackingNumberModal'
@@ -7,7 +7,7 @@ import DispatchModal from './DispatchModal'
 import ConfirmationModal from './ConfirmationModal'
 import { useToast } from './Toast/ToastContext'
 
-const ViewOrderModal = ({ order, onClose, onSave, onRequestTrackingNumber, onRequestDispatch }) => {
+const ViewOrderModal = ({ order, customerOrderCount = 1, onClose, onSave, onRequestTrackingNumber, onRequestDispatch }) => {
   const { addToast } = useToast()
   const [products, setProducts] = useState({ categories: [] })
   const [localOrder, setLocalOrder] = useState(order)
@@ -612,6 +612,26 @@ const ViewOrderModal = ({ order, onClose, onSave, onRequestTrackingNumber, onReq
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 <div style={{ fontWeight: 600, fontSize: '1.1rem', color: 'var(--text-primary)' }}>
                   {safeOrder.customerName}
+                  {customerOrderCount > 1 && (
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.2rem',
+                        padding: '0.1rem 0.4rem',
+                        backgroundColor: 'var(--accent-primary)',
+                        color: '#fff',
+                        borderRadius: '12px',
+                        fontSize: '0.7rem',
+                        fontWeight: 700,
+                        marginLeft: '0.5rem',
+                        verticalAlign: 'middle'
+                      }}
+                      title={`${customerOrderCount} orders placed`}
+                    >
+                      <Star size={12} fill="currentColor" /> {customerOrderCount}
+                    </span>
+                  )}
                 </div>
 
                 {safeOrder.address && (

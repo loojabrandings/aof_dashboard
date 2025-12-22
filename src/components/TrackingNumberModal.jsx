@@ -33,19 +33,23 @@ const TrackingNumberModal = ({ order, targetStatus = 'Packed', onClose, onSave }
       trackingNumber: trackingNumber || ''
     }
 
-    // Mark tracking number as used if provided and changed
-    // Only mark as used if it changed from blank to something, or changed value
-    if (updatedOrder.trackingNumber && (!order?.trackingNumber || order.trackingNumber !== updatedOrder.trackingNumber)) {
-      try {
-        await markTrackingNumberAsUsed(updatedOrder.trackingNumber)
-      } catch (error) {
-        console.error('Error marking tracking number as used:', error)
-      }
-    }
+    // 1. Save order first
+    const success = await onSave(updatedOrder)
 
-    onSave(updatedOrder)
-    addToast('Order updated successfully', 'success')
-    onClose()
+    if (success) {
+      // 2. Mark tracking number as used if save was successful
+      if (updatedOrder.trackingNumber && (!order?.trackingNumber || order.trackingNumber !== updatedOrder.trackingNumber)) {
+        try {
+          await markTrackingNumberAsUsed(updatedOrder.trackingNumber)
+        } catch (error) {
+          console.error('Error marking tracking number as used:', error)
+          addToast('Error marking tracking number as used', 'error') // Added toast for consistency
+        }
+      }
+
+      addToast('Order updated successfully', 'success')
+      onClose()
+    }
   }
 
   return (

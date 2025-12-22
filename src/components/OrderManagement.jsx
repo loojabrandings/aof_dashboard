@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import { Plus, Search, MessageCircle, Edit, Trash2, Eye, Download, ChevronUp, ChevronDown, Paperclip } from 'lucide-react'
+import { Plus, Search, MessageCircle, Edit, Trash2, Eye, Download, ChevronUp, ChevronDown, Paperclip, Star, Repeat } from 'lucide-react'
 import OrderForm from './OrderForm'
 import DispatchModal from './DispatchModal'
 import ViewOrderModal from './ViewOrderModal'
@@ -240,6 +240,32 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
 
     return filtered
   }, [orders, searchTerm, statusFilter, paymentFilter, scheduledDeliveriesOnly, products, sortField, sortDirection])
+
+  // Calculate customer statistics for repeat buyer recognition
+  const customerStats = useMemo(() => {
+    const stats = {}
+
+    orders.forEach(order => {
+      // Use WhatsApp number as primary identifier, fallback to phone
+      // Normalize by removing spaces and non-digit chars (except +)
+      const identifier = (order.whatsapp || order.phone || '').replace(/\s+/g, '').trim()
+
+      if (identifier && identifier.length > 5) { // Basic length check to avoid garbage
+        if (!stats[identifier]) {
+          stats[identifier] = { count: 0, totalSpend: 0 }
+        }
+        stats[identifier].count += 1
+        stats[identifier].totalSpend += (Number(order.totalPrice) || 0)
+      }
+    })
+
+    return stats
+  }, [orders])
+
+  const getCustomerOrderCount = (order) => {
+    const identifier = (order.whatsapp || order.phone || '').replace(/\s+/g, '').trim()
+    return (identifier && customerStats[identifier]) ? customerStats[identifier].count : 1
+  }
 
   // NOTE: In status mode we do NOT write filter-matching IDs into `selectedOrders`.
   // `selectedOrders` is reserved for manual extra selections (outside current filters),
@@ -1112,7 +1138,28 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
                       </td>
                       <td>
                         <div>
-                          <div style={{ fontWeight: 500 }}>{order.customerName}</div>
+                          <div style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                            {order.customerName}
+                            {getCustomerOrderCount(order) > 1 && (
+                              <span
+                                title={`${getCustomerOrderCount(order)} orders placed`}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '0.2rem',
+                                  padding: '0.1rem 0.4rem',
+                                  backgroundColor: 'var(--accent-primary)',
+                                  color: '#fff',
+                                  borderRadius: '12px',
+                                  fontSize: '0.65rem',
+                                  fontWeight: 700,
+                                  whiteSpace: 'nowrap'
+                                }}
+                              >
+                                <Star size={10} fill="currentColor" /> {getCustomerOrderCount(order)}
+                              </span>
+                            )}
+                          </div>
                           {order.whatsapp && (
                             <div style={{ fontSize: '0.75rem', color: '#25D366', marginTop: '0.25rem' }}>
                               {formatWhatsAppNumber(order.whatsapp)}
@@ -1349,6 +1396,23 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
                     <div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                         <span style={{ fontWeight: 700, color: 'var(--accent-primary)', fontSize: '1.1rem' }}>#{order.id}</span>
+                        {getCustomerOrderCount(order) > 1 && (
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.2rem',
+                              padding: '0.1rem 0.4rem',
+                              backgroundColor: 'var(--accent-primary)',
+                              color: '#fff',
+                              borderRadius: '12px',
+                              fontSize: '0.65rem',
+                              fontWeight: 700
+                            }}
+                          >
+                            <Star size={10} fill="currentColor" /> {getCustomerOrderCount(order)}
+                          </span>
+                        )}
                         {Array.isArray(order.orderItems) && order.orderItems.some(it => it.image) && (
                           <Paperclip size={14} style={{ color: 'var(--text-muted)' }} />
                         )}
@@ -1543,6 +1607,7 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
       {showViewModal && viewingOrder && (
         <ViewOrderModal
           order={viewingOrder}
+          customerOrderCount={getCustomerOrderCount(viewingOrder)}
           onClose={() => {
             setShowViewModal(false)
             setViewingOrder(null)

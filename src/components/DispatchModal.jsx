@@ -36,21 +36,23 @@ const DispatchModal = ({ order, onClose, onSave }) => {
       status: 'Dispatched'
     }
 
-    try {
-      // Only mark as used if it changed from blank to something, or changed value
-      if (updatedOrder.trackingNumber && (!order?.trackingNumber || order.trackingNumber !== updatedOrder.trackingNumber)) {
-        await markTrackingNumberAsUsed(updatedOrder.trackingNumber)
-      }
-    } catch (error) {
-      console.error('Error marking tracking number as used:', error)
-      addToast('Error marking tracking number as used', 'error')
-      // Don't block save on tracking error? Or maybe we should. 
-      // Proceeding for now but logging error.
-    }
+    // 1. Save order first
+    const success = await onSave(updatedOrder)
 
-    onSave(updatedOrder)
-    addToast('Order dispatched successfully', 'success')
-    onClose()
+    if (success) {
+      try {
+        // 2. Only mark as used if save was successful
+        if (updatedOrder.trackingNumber && (!order?.trackingNumber || order.trackingNumber !== updatedOrder.trackingNumber)) {
+          await markTrackingNumberAsUsed(updatedOrder.trackingNumber)
+        }
+      } catch (error) {
+        console.error('Error marking tracking number as used:', error)
+        addToast('Error marking tracking number as used', 'error')
+      }
+
+      addToast('Order dispatched successfully', 'success')
+      onClose()
+    }
   }
 
   return (
