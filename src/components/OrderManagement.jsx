@@ -163,7 +163,7 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
       }
 
       const matchesScheduled = scheduledDeliveriesOnly
-        ? isWithinNextDays(order.deliveryDate, 3)
+        ? isWithinNextDays(order.deliveryDate, 3) && !['Dispatched', 'returned', 'refund', 'cancelled'].includes(order.status)
         : true
 
       return matchesSearch && matchesStatus && matchesPayment && matchesScheduled

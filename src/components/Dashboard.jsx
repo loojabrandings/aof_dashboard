@@ -398,6 +398,7 @@ const Dashboard = ({ orders, expenses, inventory = [], products, onNavigate }) =
           color="var(--accent-primary)"
           subtitle={`Ads: ${adsCount} | Organic: ${organicCount}`}
           onClick={() => onNavigate && onNavigate('orders')}
+          disabled={totalOrdersThisMonth === 0}
         />
         <SummaryCard
           title="Pending to Dispatch"
@@ -406,6 +407,7 @@ const Dashboard = ({ orders, expenses, inventory = [], products, onNavigate }) =
           color="var(--warning)"
           subtitle={`Rs.${pendingDispatchValue.toLocaleString('en-IN')} value`}
           onClick={() => onNavigate && onNavigate('orders', { statusFilter: 'pendingDispatch' })}
+          disabled={pendingDispatch.length === 0}
         />
         <SummaryCard
           title="Net Profit"
@@ -421,6 +423,7 @@ const Dashboard = ({ orders, expenses, inventory = [], products, onNavigate }) =
           color="var(--danger)"
           subtitle={`${pendingPayments.length} open invoices`}
           onClick={() => onNavigate && onNavigate('orders', { statusFilter: 'Dispatched', paymentFilter: 'Pending' })}
+          disabled={pendingPayments.length === 0}
         />
       </div>
 
@@ -432,18 +435,32 @@ const Dashboard = ({ orders, expenses, inventory = [], products, onNavigate }) =
         gap: '2rem',
         marginBottom: '2.5rem'
       }}>
-        <div className="card" style={{ padding: window.innerWidth < 600 ? '1.25rem' : '1.75rem' }}>
+        <div className="card" style={{
+          padding: window.innerWidth < 600 ? '1.25rem' : '1.75rem',
+          backgroundColor: upcomingScheduledDeliveries.length === 0 ? 'rgba(255, 255, 255, 0.02)' : undefined,
+          border: upcomingScheduledDeliveries.length === 0 ? '1px solid rgba(255, 255, 255, 0.05)' : undefined,
+          opacity: upcomingScheduledDeliveries.length === 0 ? 0.7 : 1
+        }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-            <h3 style={{ fontSize: window.innerWidth < 600 ? '1.1rem' : '1.25rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <Calendar size={20} color="var(--accent-primary)" />
+            <h3 style={{
+              fontSize: window.innerWidth < 600 ? '1.1rem' : '1.25rem',
+              fontWeight: 700,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.75rem',
+              color: upcomingScheduledDeliveries.length === 0 ? 'var(--text-muted)' : 'var(--text-primary)'
+            }}>
+              <Calendar size={20} color={upcomingScheduledDeliveries.length === 0 ? "var(--text-muted)" : "var(--accent-primary)"} style={{ opacity: upcomingScheduledDeliveries.length === 0 ? 0.5 : 1 }} />
               Scheduled Deliveries
             </h3>
-            <button
-              onClick={() => onNavigate('orders', { scheduledDeliveries: true })}
-              style={{ background: 'transparent', color: 'var(--accent-primary)', fontSize: '0.875rem', fontWeight: 600 }}
-            >
-              View All
-            </button>
+            {upcomingScheduledDeliveries.length > 0 && (
+              <button
+                onClick={() => onNavigate('orders', { scheduledDeliveries: true })}
+                style={{ background: 'transparent', color: 'var(--accent-primary)', fontSize: '0.875rem', fontWeight: 600 }}
+              >
+                View All
+              </button>
+            )}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             {upcomingScheduledDeliveries.length === 0 ? (
@@ -486,18 +503,32 @@ const Dashboard = ({ orders, expenses, inventory = [], products, onNavigate }) =
           </div>
         </div>
 
-        <div className="card" style={{ padding: window.innerWidth < 600 ? '1.25rem' : '1.75rem' }}>
+        <div className="card" style={{
+          padding: window.innerWidth < 600 ? '1.25rem' : '1.75rem',
+          backgroundColor: criticalItems.length === 0 ? 'rgba(255, 255, 255, 0.02)' : undefined,
+          border: criticalItems.length === 0 ? '1px solid rgba(255, 255, 255, 0.05)' : undefined,
+          opacity: criticalItems.length === 0 ? 0.7 : 1
+        }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-            <h3 style={{ fontSize: window.innerWidth < 600 ? '1.1rem' : '1.25rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <AlertTriangle size={20} color="var(--warning)" />
+            <h3 style={{
+              fontSize: window.innerWidth < 600 ? '1.1rem' : '1.25rem',
+              fontWeight: 700,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.75rem',
+              color: criticalItems.length === 0 ? 'var(--text-muted)' : 'var(--text-primary)'
+            }}>
+              <AlertTriangle size={20} color={criticalItems.length === 0 ? "var(--text-muted)" : "var(--warning)"} style={{ opacity: criticalItems.length === 0 ? 0.5 : 1 }} />
               Low Stock Alerts
             </h3>
-            <button
-              onClick={() => onNavigate('inventory', { stockFilter: 'below' })}
-              style={{ background: 'transparent', color: 'var(--accent-primary)', fontSize: '0.875rem', fontWeight: 600 }}
-            >
-              Inventory
-            </button>
+            {criticalItems.length > 0 && (
+              <button
+                onClick={() => onNavigate('inventory', { stockFilter: 'below' })}
+                style={{ background: 'transparent', color: 'var(--accent-primary)', fontSize: '0.875rem', fontWeight: 600 }}
+              >
+                Inventory
+              </button>
+            )}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             {criticalItems.length === 0 ? (
