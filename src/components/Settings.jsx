@@ -211,22 +211,20 @@ const Settings = ({ orders = [], expenses = [], inventory = [], onDataImported, 
       {activeTab === 'general' && (
         <>
 
-          {(settings?.curfox?.enabled !== true) && (
-            <CollapsibleSection
-              title="Tracking Numbers"
-              icon={Package}
-              isExpanded={expandedSections.trackingNumbers}
-              onToggle={() => toggleSection('trackingNumbers')}
-            >
-              <TrackingNumberManagement
-                trackingNumbers={trackingNumbers}
-                setTrackingNumbers={setTrackingNumbers}
-                showAlert={showAlert}
-                showConfirm={showConfirm}
-                showToast={addToast} // Pass showToast
-              />
-            </CollapsibleSection>
-          )}
+          <CollapsibleSection
+            title="Tracking Numbers"
+            icon={Package}
+            isExpanded={expandedSections.trackingNumbers}
+            onToggle={() => toggleSection('trackingNumbers')}
+          >
+            <TrackingNumberManagement
+              trackingNumbers={trackingNumbers}
+              setTrackingNumbers={setTrackingNumbers}
+              showAlert={showAlert}
+              showConfirm={showConfirm}
+              showToast={addToast} // Pass showToast
+            />
+          </CollapsibleSection>
           {/* Curfox Integration Section */}
           <CollapsibleSection
             title="Curfox Courier Integration"
@@ -1170,6 +1168,7 @@ const CurfoxSettings = ({ settings, setSettings, showToast }) => {
   const [email, setEmail] = useState(settings?.curfox?.email || '')
   const [password, setPassword] = useState(settings?.curfox?.password || '')
   const [tenant, setTenant] = useState(settings?.curfox?.tenant || '')
+  const [businessId, setBusinessId] = useState(settings?.curfox?.businessId || '')
   const [isEnabled, setIsEnabled] = useState(settings?.curfox?.enabled || false)
   const [isTesting, setIsTesting] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
@@ -1183,9 +1182,13 @@ const CurfoxSettings = ({ settings, setSettings, showToast }) => {
         return
       }
 
-      const token = await curfoxService.login(email, password, tenant)
-      if (token) {
-        showToast('Connection Successful! Token retrieved.', 'success')
+      const authData = await curfoxService.login(email, password, tenant)
+      if (authData && authData.token) {
+        showToast('Connection Successful! Token verified.', 'success')
+        if (authData.businessId) {
+          setBusinessId(authData.businessId)
+          showToast('Business ID retrieved: ' + authData.businessId, 'info')
+        }
       } else {
         showToast('Connection Failed. Check credentials.', 'error')
       }
@@ -1203,6 +1206,7 @@ const CurfoxSettings = ({ settings, setSettings, showToast }) => {
         email,
         password,
         tenant,
+        businessId, // Save the business ID
         enabled: isEnabled
       }
     }

@@ -92,30 +92,59 @@ const OrderForm = ({ order, onClose, onSave, checkIsBlacklisted, onBlacklistWarn
     }
 
 
+    const applyCurfoxData = (districtsData, citiesData) => {
+      if (districtsData && districtsData.length > 0) {
+        const districtNames = districtsData.map(d => d.name || d.state_name).filter(Boolean)
+        if (districtNames.length > 0) setDistricts(districtNames.sort())
+      }
+      if (citiesData && citiesData.length > 0) {
+        setCurfoxCities(citiesData)
+        // Initial filter if editing an order
+        if (formData.district) {
+          const dist = formData.district.toLowerCase()
+          const filtered = citiesData.filter(c =>
+            (c.district_name?.toLowerCase() === dist) ||
+            (c.district?.toLowerCase() === dist) ||
+            (c.state_name?.toLowerCase() === dist)
+          ).map(c => c.name || c.city_name || c)
+          setAvailableCities(filtered.sort())
+        }
+      }
+    }
+
+    const handleCurfoxDataUpdate = (e) => {
+      const { districts, cities } = e.detail || {}
+      applyCurfoxData(districts, cities)
+    }
+
     const loadCurfoxData = async () => {
       const settings = await getSettings()
-      if (settings?.curfox?.enabled) {
-        setIsCurfoxEnabled(true)
-        try {
-          // Fetch Districts
-          const fetchedDistricts = await curfoxService.getDistricts()
-          if (fetchedDistricts && fetchedDistricts.length > 0) {
-            setDistricts(fetchedDistricts)
-          }
+      if (!settings?.curfox?.enabled) return
 
-          // Fetch Cities
-          const fetchedCities = await curfoxService.getCities()
-          if (fetchedCities && fetchedCities.length > 0) {
-            setCurfoxCities(fetchedCities)
-          }
-        } catch (error) {
-          console.error("Failed to load Curfox data", error)
+      setIsCurfoxEnabled(true)
+
+      // 1. Try Cache
+      try {
+        const cachedD = localStorage.getItem('curfox_cache_districts')
+        const cachedC = localStorage.getItem('curfox_cache_cities')
+        if (cachedD && cachedC) {
+          applyCurfoxData(JSON.parse(cachedD), JSON.parse(cachedC))
         }
+      } catch (e) {
+        console.error("Error reading Curfox cache", e)
       }
     }
 
     loadData()
     loadCurfoxData()
+
+    // 2. Listen for updates (in case OrderForm opened before AuthHandler finished)
+    window.addEventListener('curfoxDataUpdated', handleCurfoxDataUpdate)
+
+    // Cleanup event listener
+    return () => {
+      window.removeEventListener('curfoxDataUpdated', handleCurfoxDataUpdate)
+    }
   }, [])
 
   // Refresh sources in real-time when settings change
@@ -289,10 +318,47 @@ const OrderForm = ({ order, onClose, onSave, checkIsBlacklisted, onBlacklistWarn
     }
 
     // Update available cities when district changes
+    if (name === 'district') {
+      const newDistrict = value
+      if (isCurfoxEnabled && curfoxCities.length > 0) {
+        console.log('Filtering cities for district:', newDistrict)
+        const dist = newDistrict.toLowerCase()
+        const filtered = curfoxCities.filter(c =>
+          (c.district_name && c.district_name.toLowerCase() === dist) ||
+          (c.district && c.district.toLowerCase() === dist) ||
+          // Fallback: check map provided earlier or fuzzy match
+          (c.state_name && c.state_name.toLowerCase() === dist)
+        ).map(c => c.name || c.city_name || c)
 
+        console.log('Found cities:', filtered.length)
+        setAvailableCities(filtered.sort())
+      } else if (isCurfoxEnabled) {
+        console.warn('Clearing available cities - Curfox enabled but cities list empty/loading.')
+        setAvailableCities([])
+      }
+    }
 
     setFormData(updatedData)
   }
+
+  // Effect to re-filter cities if curfoxCities loads AFTER district is selected
+  useEffect(() => {
+    if (isCurfoxEnabled && formData.district && curfoxCities.length > 0) {
+      console.log('Refiltering cities effect (data loaded/changed). District:', formData.district)
+      const dist = formData.district.toLowerCase()
+      const filtered = curfoxCities.filter(c =>
+        (c.district_name?.toLowerCase() === dist) ||
+        (c.district?.toLowerCase() === dist) ||
+        (c.state_name?.toLowerCase() === dist)
+      ).map(c => c.name || c.city_name || c)
+
+      // Only update if changed to avoid loop (simple length check is usually enough here)
+      if (filtered.length !== availableCities.length) {
+        console.log(`Updated available cities from ${availableCities.length} to ${filtered.length}`)
+        setAvailableCities(filtered.sort())
+      }
+    }
+  }, [curfoxCities, isCurfoxEnabled, formData.district])
 
 
 

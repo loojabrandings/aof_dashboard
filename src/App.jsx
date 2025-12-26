@@ -15,6 +15,7 @@ import { Loader2 } from 'lucide-react'
 import { ToastProvider } from './components/Toast/ToastContext'
 import ToastContainer from './components/Toast/ToastContainer'
 import AutoBackupHandler from './components/AutoBackupHandler'
+import CurfoxAuthHandler from './components/CurfoxAuthHandler'
 
 function App() {
   const [session, setSession] = useState(null)
@@ -50,7 +51,6 @@ function App() {
   // Load data from Supabase on mount or session change
   useEffect(() => {
     if (!session) return
-
     const loadData = async () => {
       setDataLoading(true)
       try {
@@ -252,6 +252,7 @@ function App() {
         <div className="bg-blob bg-blob-3"></div>
         <ToastContainer />
         <AutoBackupHandler session={session} dataLoading={dataLoading} />
+        <CurfoxAuthHandler session={session} />
         <Sidebar
           activeView={activeView}
           setActiveView={handleViewChange}

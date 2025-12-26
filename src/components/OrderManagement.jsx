@@ -371,17 +371,9 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
 
     // If status changed to Packed and tracking number isn't set, prompt for tracking number
     if (field === 'status' && newValue === 'Packed' && order) {
-      if (isCurfoxEnabled) {
-        // Curfox Mode: Always prompt for Waybill ID if not present (or even if present to confirm? User said "I need to enter waybill id when packed")
-        // If it already has one, maybe we don't need to re-enter? Assuming if not present.
-        if (!order.trackingNumber) {
-          setWaybillTargetOrder(order)
-          setShowWaybillModal(true)
-          setEditingStatus(null)
-          return
-        }
-      } else if (!order.trackingNumber) {
-        // Legacy Mode
+      // Regardless of Curfox enabled/disabled, use the internal Tracking Number Management
+      // This allows picking from the pre-loaded specific tracking number list.
+      if (!order.trackingNumber) {
         setTrackingOrder(order)
         setTrackingTargetStatus('Packed')
         setShowTrackingModal(true)
@@ -1305,6 +1297,16 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
                               </span>
                             )}
                           </div>
+                          {order.trackingNumber && (
+                            <div style={{
+                              fontSize: '0.7rem',
+                              color: 'var(--text-muted)',
+                              fontFamily: 'monospace',
+                              marginTop: '2px'
+                            }}>
+                              {order.trackingNumber}
+                            </div>
+                          )}
                           {order.whatsapp && (
                             <div style={{ fontSize: '0.75rem', color: '#25D366', marginTop: '0.25rem' }}>
                               {formatWhatsAppNumber(order.whatsapp)}
@@ -1449,17 +1451,6 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
                           >
                             <Eye size={14} />
                           </button>
-                          {isCurfoxEnabled && order.status === 'Packed' && (
-                            <button
-                              className="btn btn-sm btn-primary"
-                              onClick={() => handleCurfoxDispatch(order)}
-                              title="Send to Curfox"
-                              disabled={isDispatching}
-                              style={{ backgroundColor: 'var(--accent-secondary)', color: 'white' }}
-                            >
-                              {isDispatching && waybillTargetOrder?.id === order.id ? <Loader size={14} className="spin" /> : <Truck size={14} />}
-                            </button>
-                          )}
                           <button
                             className="btn btn-sm btn-secondary"
                             onClick={() => handleWhatsApp(order)}
@@ -1491,6 +1482,22 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
                           >
                             <Trash2 size={14} />
                           </button>
+                          {isCurfoxEnabled && order.status === 'Packed' && (
+                            <button
+                              className="btn btn-sm btn-primary"
+                              onClick={() => handleCurfoxDispatch(order)}
+                              title="Send to Curfox"
+                              disabled={isDispatching}
+                              style={{
+                                backgroundColor: 'var(--accent-secondary)',
+                                color: 'white',
+                                marginLeft: '0.25rem',
+                                border: '1px solid rgba(255,255,255,0.2)'
+                              }}
+                            >
+                              {isDispatching && waybillTargetOrder?.id === order.id ? <Loader size={14} className="spin" /> : <Truck size={14} />}
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -1576,6 +1583,20 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
                       <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
                         {order.createdDate || order.orderDate}
                       </div>
+                      {order.trackingNumber && (
+                        <div style={{
+                          fontSize: '0.75rem',
+                          color: 'var(--text-color)',
+                          marginTop: '0.2rem',
+                          fontFamily: 'monospace',
+                          backgroundColor: 'rgba(0,0,0,0.05)',
+                          padding: '2px 4px',
+                          borderRadius: '4px',
+                          display: 'inline-block'
+                        }}>
+                          {order.trackingNumber}
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
