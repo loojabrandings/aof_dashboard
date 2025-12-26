@@ -4,6 +4,7 @@ import { calculateNextOrderNumber, markTrackingNumberAsUsed, getProducts, getOrd
 import { uploadOrderItemImage, deleteOrderItemImage } from '../utils/fileStorage'
 import { formatWhatsAppForStorage } from '../utils/whatsapp'
 import TrackingNumberInput from './TrackingNumberInput'
+import { curfoxService } from '../utils/curfox'
 
 // Sri Lankan Districts
 const SRI_LANKAN_DISTRICTS = [
@@ -18,6 +19,9 @@ const OrderForm = ({ order, onClose, onSave, checkIsBlacklisted, onBlacklistWarn
   const [products, setProducts] = useState({ categories: [] })
   const [orderSources, setOrderSources] = useState([])
   const [districts, setDistricts] = useState(SRI_LANKAN_DISTRICTS)
+  const [isCurfoxEnabled, setIsCurfoxEnabled] = useState(false)
+  const [curfoxCities, setCurfoxCities] = useState([]) // All cities
+  const [availableCities, setAvailableCities] = useState([]) // Filtered by district
 
   const [codManuallyEdited, setCodManuallyEdited] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
@@ -86,7 +90,32 @@ const OrderForm = ({ order, onClose, onSave, checkIsBlacklisted, onBlacklistWarn
         setOrderNumber(order.id)
       }
     }
+
+
+    const loadCurfoxData = async () => {
+      const settings = await getSettings()
+      if (settings?.curfox?.enabled) {
+        setIsCurfoxEnabled(true)
+        try {
+          // Fetch Districts
+          const fetchedDistricts = await curfoxService.getDistricts()
+          if (fetchedDistricts && fetchedDistricts.length > 0) {
+            setDistricts(fetchedDistricts)
+          }
+
+          // Fetch Cities
+          const fetchedCities = await curfoxService.getCities()
+          if (fetchedCities && fetchedCities.length > 0) {
+            setCurfoxCities(fetchedCities)
+          }
+        } catch (error) {
+          console.error("Failed to load Curfox data", error)
+        }
+      }
+    }
+
     loadData()
+    loadCurfoxData()
   }, [])
 
   // Refresh sources in real-time when settings change
@@ -220,6 +249,24 @@ const OrderForm = ({ order, onClose, onSave, checkIsBlacklisted, onBlacklistWarn
       codAmount: codManuallyEdited ? prev.codAmount : computedCod
     }))
   }, [computedTotal, computedCod, codManuallyEdited])
+
+
+  // Filter cities when district changes
+  useEffect(() => {
+    if (isCurfoxEnabled && formData.district) {
+      // Assuming curfoxCities is array of objects { name, district_name, ... } or similar
+      // Adjust matching logic based on actual data structure. 
+      // For now, assuming simple string matching or object structure
+      const filtered = curfoxCities.filter(c =>
+        (c.district_name && c.district_name.toLowerCase() === formData.district.toLowerCase()) ||
+        (c.district && c.district.toLowerCase() === formData.district.toLowerCase())
+      ).map(c => c.name || c.city_name || c)
+
+      setAvailableCities(filtered.sort())
+    } else {
+      setAvailableCities([])
+    }
+  }, [formData.district, curfoxCities, isCurfoxEnabled])
 
   const handleChange = (e) => {
     const { name, value } = e.target
@@ -489,7 +536,15 @@ const OrderForm = ({ order, onClose, onSave, checkIsBlacklisted, onBlacklistWarn
                   onChange={handleChange}
                   placeholder="e.g., Colombo"
                   autoComplete="off"
+                  list={isCurfoxEnabled ? "curfox-city-list" : undefined}
                 />
+                {isCurfoxEnabled && (
+                  <datalist id="curfox-city-list">
+                    {availableCities.map((city, idx) => (
+                      <option key={`${city}-${idx}`} value={city} />
+                    ))}
+                  </datalist>
+                )}
               </div>
             </div>
           </div>

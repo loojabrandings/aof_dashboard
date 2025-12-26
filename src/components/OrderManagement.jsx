@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import { Plus, Search, MessageCircle, Edit, Trash2, Eye, Download, ChevronUp, ChevronDown, Paperclip, Star, Repeat } from 'lucide-react'
+import { Plus, Search, MessageCircle, Edit, Trash2, Eye, Download, ChevronUp, ChevronDown, Paperclip, Star, Repeat, Truck, X, Loader } from 'lucide-react'
 import OrderForm from './OrderForm'
 import DispatchModal from './DispatchModal'
 import ViewOrderModal from './ViewOrderModal'
@@ -10,6 +10,7 @@ import { deleteOrderItemImage } from '../utils/fileStorage'
 import { formatWhatsAppNumber, generateWhatsAppMessage } from '../utils/whatsapp'
 import * as XLSX from 'xlsx'
 import { useToast } from './Toast/ToastContext'
+import { curfoxService } from '../utils/curfox'
 
 const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilters = {} }) => {
   const { addToast } = useToast()
@@ -37,6 +38,12 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
   const [sortDirection, setSortDirection] = useState('asc') // Sort direction: 'asc' or 'desc'
 
   const [settings, setSettings] = useState(null)
+
+  const [isCurfoxEnabled, setIsCurfoxEnabled] = useState(false)
+  const [showWaybillModal, setShowWaybillModal] = useState(false)
+  const [waybillTargetOrder, setWaybillTargetOrder] = useState(null)
+  const [isDispatching, setIsDispatching] = useState(false)
+  const [dispatchProgress, setDispatchProgress] = useState({ current: 0, total: 0 })
 
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1)
@@ -90,6 +97,15 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
       setSettings(settingsData)
     }
     loadData()
+
+  }, [])
+
+  useEffect(() => {
+    getSettings().then(settings => {
+      if (settings?.curfox?.enabled) {
+        setIsCurfoxEnabled(true)
+      }
+    })
   }, [])
 
   // Sync filters when navigation passes new initialFilters (e.g., dashboard cards)
@@ -353,17 +369,31 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
     const order = orders.find(o => o.id === orderId)
     const today = new Date().toISOString().split('T')[0]
 
-    // If status changed to Packed and tracking number isn't set, prompt for tracking number (no full edit form)
-    if (field === 'status' && newValue === 'Packed' && order && !order.trackingNumber) {
-      setTrackingOrder(order)
-      setTrackingTargetStatus('Packed')
-      setShowTrackingModal(true)
-      setEditingStatus(null)
-      return
+    // If status changed to Packed and tracking number isn't set, prompt for tracking number
+    if (field === 'status' && newValue === 'Packed' && order) {
+      if (isCurfoxEnabled) {
+        // Curfox Mode: Always prompt for Waybill ID if not present (or even if present to confirm? User said "I need to enter waybill id when packed")
+        // If it already has one, maybe we don't need to re-enter? Assuming if not present.
+        if (!order.trackingNumber) {
+          setWaybillTargetOrder(order)
+          setShowWaybillModal(true)
+          setEditingStatus(null)
+          return
+        }
+      } else if (!order.trackingNumber) {
+        // Legacy Mode
+        setTrackingOrder(order)
+        setTrackingTargetStatus('Packed')
+        setShowTrackingModal(true)
+        setEditingStatus(null)
+        return
+      }
     }
 
     // If status changed to Dispatched and tracking number isn't set, use Dispatch modal (captures dispatch date + tracking)
     if (field === 'status' && newValue === 'Dispatched' && order && !order.trackingNumber) {
+      // If Curfox enabled, we might want to block manual dispatch status change without API dispatch?
+      // But user might want manual override. Leaving as is for now, but usually they should use the "Dispatch Button"
       setEditingOrder({ ...order, status: 'Dispatched' })
       setShowDispatchModal(true)
       setEditingStatus(null)
@@ -384,6 +414,94 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
     await saveOrders(updatedOrders)
     onUpdateOrders(updatedOrders)
     setEditingStatus(null)
+  }
+
+  // Curfox Dispatch Logic
+  const handleCurfoxDispatch = async (order) => {
+    if (!order.trackingNumber) {
+      addToast('Order must have a Waybill ID (Packed status) before dispatching.', 'error')
+      return
+    }
+
+    try {
+      setIsDispatching(true)
+      // Call API
+      await curfoxService.createOrder(order, order.trackingNumber, settings?.curfox) // Assuming settings loaded in curfoxService or passed
+
+      // Update Order Status
+      const today = new Date().toISOString().split('T')[0]
+      const updatedOrder = { ...order, status: 'Dispatched', dispatchDate: today }
+
+      const updatedOrders = orders.map(o => o.id === order.id ? updatedOrder : o)
+      await saveOrders(updatedOrders)
+      onUpdateOrders(updatedOrders)
+
+      addToast('Order dispatched to Curfox successfully!', 'success')
+    } catch (error) {
+      console.error(error)
+      addToast('Curfox Dispatch Failed: ' + error.message, 'error')
+    } finally {
+      setIsDispatching(false)
+    }
+  }
+
+  const handleBulkCurfoxDispatch = async () => {
+    const selected = getAllSelectedOrders()
+    const packedWithWaybill = selected.filter(o => o.status === 'Packed' && o.trackingNumber)
+
+    if (packedWithWaybill.length === 0) {
+      addToast('No "Packed" orders with Waybill IDs selected.', 'warning')
+      return
+    }
+
+    showConfirm('Confirm Bulk Dispatch', `Dispatch ${packedWithWaybill.length} orders to Curfox?`, async () => {
+      setIsDispatching(true)
+      setDispatchProgress({ current: 0, total: packedWithWaybill.length })
+
+      let successCount = 0
+      let failedCount = 0
+      const today = new Date().toISOString().split('T')[0]
+      let newOrders = [...orders] // Clone to update incrementally or all at once? Better to update all at once at end to avoid flicker, or iteratively.
+
+      // We'll update the 'orders' list in memory then save once? Or save iteratively?
+      // For safety, let's create a map of updates
+      const updates = {}
+
+      for (const order of packedWithWaybill) {
+        try {
+          // Pass settings.curfox implicitly? Ideally curfoxService handles looking up if not passed, 
+          // but seeing our implementation it relies on arguments. We need to pass auth data if service doesn't store it.
+          // Service implementation in previous step didn't load settings itself. 
+          // We need to pass settings.curfox here!
+          await curfoxService.createOrder(order, order.trackingNumber, settings?.curfox)
+
+          updates[order.id] = { status: 'Dispatched', dispatchDate: today }
+          successCount++
+        } catch (error) {
+          console.error(`Failed to dispatch order ${order.id}`, error)
+          failedCount++
+        }
+        setDispatchProgress(prev => ({ ...prev, current: prev.current + 1 }))
+      }
+
+      if (successCount > 0) {
+        const finalOrders = newOrders.map(o => updates[o.id] ? { ...o, ...updates[o.id] } : o)
+        await saveOrders(finalOrders)
+        onUpdateOrders(finalOrders)
+      }
+
+      setIsDispatching(false)
+      setDispatchProgress({ current: 0, total: 0 })
+
+      if (failedCount === 0) {
+        addToast(`Successfully dispatched ${successCount} orders!`, 'success')
+        // Deselect successful ones?
+        const remainingSelection = new Set([...selectedOrders].filter(id => !updates[id]))
+        setSelectedOrders(remainingSelection)
+      } else {
+        addToast(`Dispatched ${successCount} orders. ${failedCount} failed.`, 'warning')
+      }
+    })
   }
 
   const handleStatusClick = (orderId, field, e) => {
@@ -1040,7 +1158,9 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
                   value=""
                   onChange={(e) => {
                     if (e.target.value) {
-                      handleBulkPaymentStatusChange(e.target.value)
+                      e.target.value === 'curfox_dispatch'
+                        ? handleBulkCurfoxDispatch()
+                        : handleBulkPaymentStatusChange(e.target.value)
                       e.target.value = ''
                     }
                   }}
@@ -1049,6 +1169,9 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
                   <option value="">Change Payment Status...</option>
                   <option value="Pending">Pending</option>
                   <option value="Paid">Paid</option>
+                  {isCurfoxEnabled && (
+                    <option value="curfox_dispatch">Dispatch (Curfox)</option>
+                  )}
                 </select>
               </div>
             )}
@@ -1326,6 +1449,17 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
                           >
                             <Eye size={14} />
                           </button>
+                          {isCurfoxEnabled && order.status === 'Packed' && (
+                            <button
+                              className="btn btn-sm btn-primary"
+                              onClick={() => handleCurfoxDispatch(order)}
+                              title="Send to Curfox"
+                              disabled={isDispatching}
+                              style={{ backgroundColor: 'var(--accent-secondary)', color: 'white' }}
+                            >
+                              {isDispatching && waybillTargetOrder?.id === order.id ? <Loader size={14} className="spin" /> : <Truck size={14} />}
+                            </button>
+                          )}
                           <button
                             className="btn btn-sm btn-secondary"
                             onClick={() => handleWhatsApp(order)}
@@ -1780,6 +1914,60 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
         isAlert={modalConfig.isAlert}
         confirmText={modalConfig.confirmText}
       />
+
+
+      {/* Waybill Entry Modal */}
+      {showWaybillModal && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ maxWidth: '400px' }}>
+            <div className="modal-header">
+              <h2 className="modal-title">Enter Waybill ID</h2>
+              <button className="modal-close" onClick={() => setShowWaybillModal(false)}>
+                <X size={20} />
+              </button>
+            </div>
+            <form onSubmit={async (e) => {
+              e.preventDefault()
+              const trackingNumber = e.target.trackingNumber.value
+              if (trackingNumber && waybillTargetOrder) {
+                const updated = { ...waybillTargetOrder, status: 'Packed', trackingNumber }
+                const updatedOrders = orders.map(o => o.id === updated.id ? updated : o)
+                await saveOrders(updatedOrders)
+                onUpdateOrders(updatedOrders)
+                setShowWaybillModal(false)
+                setWaybillTargetOrder(null)
+                addToast('Order Packed & Waybill Saved', 'success')
+              }
+            }}>
+              <div className="form-group">
+                <label className="form-label">Waybill / Sticker ID *</label>
+                <input
+                  name="trackingNumber"
+                  className="form-input"
+                  required
+                  autoFocus
+                  placeholder="Scan or type Waybill ID..."
+                />
+                <small style={{ color: 'var(--text-muted)' }}>Scan the barcode on the physical sticker.</small>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
+                <button type="submit" className="btn btn-primary">Save & Pack</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Dispatch Progress Overlay */}
+      {isDispatching && (dispatchProgress.total > 0) && (
+        <div className="modal-overlay" style={{ zIndex: 9999 }}>
+          <div className="modal-content" style={{ maxWidth: '300px', textAlign: 'center', padding: '2rem' }}>
+            <Loader size={32} className="spin" style={{ margin: '0 auto 1rem', color: 'var(--accent-primary)' }} />
+            <h3>Dispatching to Curfox...</h3>
+            <p>{dispatchProgress.current} / {dispatchProgress.total}</p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
