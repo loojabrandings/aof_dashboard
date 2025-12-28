@@ -201,6 +201,7 @@ function App() {
             orders={orders}
             expenses={expenses}
             inventory={inventory}
+            onUpdateOrders={updateOrders}
           />
         )
       case 'settings':

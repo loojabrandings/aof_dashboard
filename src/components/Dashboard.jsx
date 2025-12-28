@@ -513,7 +513,6 @@ const Dashboard = ({ orders, expenses, inventory = [], products, onNavigate }) =
                   <div key={delivery.id} style={{
                     display: 'flex',
                     justifyContent: 'space-between',
-                    alignItems: 'center',
                     padding: '1rem',
                     backgroundColor: isOverdue ? 'rgba(239, 68, 68, 0.08)' : 'rgba(255, 255, 255, 0.03)',
                     borderRadius: '12px',
@@ -582,7 +581,6 @@ const Dashboard = ({ orders, expenses, inventory = [], products, onNavigate }) =
                 <div key={item.id} style={{
                   display: 'flex',
                   justifyContent: 'space-between',
-                  alignItems: 'center',
                   padding: '1rem',
                   backgroundColor: 'rgba(239, 68, 68, 0.05)',
                   borderRadius: '12px',

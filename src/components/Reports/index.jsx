@@ -10,7 +10,7 @@ import { filterByDateRange, getMonthlyFinancials } from '../../utils/reportUtils
 import * as XLSX from 'xlsx'
 import { startOfMonth, endOfMonth, format } from 'date-fns'
 
-const Reports = ({ orders, expenses, inventory }) => {
+const Reports = ({ orders, expenses, inventory, onUpdateOrders }) => {
     const [activeTab, setActiveTab] = useState('sales')
     const [isMobile, setIsMobile] = useState(window.innerWidth < 768)
     const [showExportMenu, setShowExportMenu] = useState(false)
@@ -146,12 +146,14 @@ const Reports = ({ orders, expenses, inventory }) => {
 
     const renderContent = () => {
         const props = {
-            orders: filteredOrders,
+            orders: filteredOrders, // filtered list for reports
+            internalOrders: orders, // RAW full list for reconciliation
             expenses: filteredExpenses,
             inventory,
             isMobile,
             // Pass the original range if needed by sub-components
-            range: effectiveRange
+            range: effectiveRange,
+            onUpdateOrders
         }
         switch (activeTab) {
             case 'sales': return <SalesReports {...props} />
