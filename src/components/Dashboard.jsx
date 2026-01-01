@@ -91,7 +91,7 @@ const Dashboard = ({ orders, expenses, inventory = [], products, onNavigate }) =
   }, 0)
 
   // Calculate Pending Payments (only dispatched orders with pending payment)
-  const pendingPayments = filteredOrders.filter(order => {
+  const pendingPayments = (orders || []).filter(order => {
     const status = order.status || 'Pending'
     const paymentStatus = order.paymentStatus || 'Pending'
     return status === 'Dispatched' && paymentStatus !== 'Paid'
