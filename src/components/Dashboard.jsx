@@ -102,8 +102,8 @@ const Dashboard = ({ orders, expenses, inventory = [], products, onNavigate }) =
     return sum + totalPrice
   }, 0)
 
-  // Calculate Critical Inventory Items (below reorder level)
-  const criticalItems = inventory.filter(item => item.currentStock < item.reorderLevel)
+  // Calculate Critical Inventory Items (at or below reorder level)
+  const criticalItems = inventory.filter(item => item.currentStock <= item.reorderLevel)
 
   // Generate subtitle for critical items
   const getCriticalItemsSubtitle = () => {
