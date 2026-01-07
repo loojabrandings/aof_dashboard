@@ -1160,6 +1160,44 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
               <ChevronDown size={20} />
             )}
           </button>
+          {(searchTerm !== '' || statusFilter !== 'all' || paymentFilter !== 'all' || scheduledDeliveriesOnly || sortField !== 'orderNumber' || sortDirection !== 'desc') && (
+            <button
+              onClick={() => {
+                setSearchTerm('')
+                setStatusFilter('all')
+                setPaymentFilter('all')
+                setScheduledDeliveriesOnly(false)
+                setSortField('orderNumber')
+                setSortDirection('desc')
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                padding: '0.5rem 1rem',
+                borderRadius: '6px',
+                border: 'none',
+                background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(239, 68, 68, 0.05))',
+                color: '#ef4444',
+                fontSize: '0.875rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                whiteSpace: 'nowrap'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'linear-gradient(135deg, rgba(239, 68, 68, 0.25), rgba(239, 68, 68, 0.1))'
+                e.currentTarget.style.transform = 'translateY(-1px)'
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(239, 68, 68, 0.05))'
+                e.currentTarget.style.transform = 'translateY(0)'
+              }}
+              title="Clear all filters"
+            >
+              <X size={16} /> Clear Filters
+            </button>
+          )}
         </div>
 
         {/* Select Mode Selection */}

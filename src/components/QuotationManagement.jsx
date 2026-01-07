@@ -278,8 +278,9 @@ const QuotationManagement = ({ quotations, onUpdateQuotations, orders, onUpdateO
                 </button>
             </div>
 
-            <div className="filters-bar" style={{ marginBottom: '1rem' }}>
-                <div className="search-box" style={{ position: 'relative', maxWidth: '300px' }}>
+
+            <div className="filters-bar" style={{ marginBottom: '1rem', display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                <div className="search-box" style={{ position: 'relative', flex: '1', minWidth: '200px', maxWidth: '300px' }}>
                     <Search size={18} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                     <input
                         type="text"
@@ -296,6 +297,37 @@ const QuotationManagement = ({ quotations, onUpdateQuotations, orders, onUpdateO
                         onChange={(e) => setSearchTerm(e.target.value)}
                     />
                 </div>
+                {searchTerm && (
+                    <button
+                        onClick={() => setSearchTerm('')}
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            padding: '0.5rem 1rem',
+                            borderRadius: '6px',
+                            border: 'none',
+                            background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(239, 68, 68, 0.05))',
+                            color: '#ef4444',
+                            fontSize: '0.875rem',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            transition: 'all 0.2s ease',
+                            whiteSpace: 'nowrap'
+                        }}
+                        onMouseEnter={(e) => {
+                            e.currentTarget.style.background = 'linear-gradient(135deg, rgba(239, 68, 68, 0.25), rgba(239, 68, 68, 0.1))'
+                            e.currentTarget.style.transform = 'translateY(-1px)'
+                        }}
+                        onMouseLeave={(e) => {
+                            e.currentTarget.style.background = 'linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(239, 68, 68, 0.05))'
+                            e.currentTarget.style.transform = 'translateY(0)'
+                        }}
+                        title="Clear search filter"
+                    >
+                        <X size={16} /> Clear Filters
+                    </button>
+                )}
             </div>
 
             {/* Quotations Table (Desktop) */}

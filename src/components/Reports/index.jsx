@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { FileText, TrendingUp, DollarSign, ShoppingBag, Package, PieChart, Download, Calendar, Printer, ChevronDown, FileSpreadsheet } from 'lucide-react'
+import { FileText, TrendingUp, DollarSign, ShoppingBag, Package, PieChart, Download, Calendar, Printer, ChevronDown, FileSpreadsheet, X } from 'lucide-react'
 import SalesReports from './SalesReports'
 import ExpenseReports from './ExpenseReports'
 import ProfitabilityReports from './ProfitabilityReports'
@@ -349,6 +349,45 @@ const Reports = ({ orders, expenses, inventory, onUpdateOrders }) => {
                             </div>
                         )}
                     </div>
+
+                    {(filterType !== 'month' || selectedMonth !== format(new Date(), 'yyyy-MM')) && (
+                        <button
+                            onClick={() => {
+                                setFilterType('month')
+                                setSelectedMonth(format(new Date(), 'yyyy-MM'))
+                                setDateRange({
+                                    start: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
+                                    end: format(endOfMonth(new Date()), 'yyyy-MM-dd')
+                                })
+                            }}
+                            style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.5rem',
+                                padding: '0.5rem 1rem',
+                                borderRadius: '6px',
+                                border: 'none',
+                                background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(239, 68, 68, 0.05))',
+                                color: '#ef4444',
+                                fontSize: '0.875rem',
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                                transition: 'all 0.2s ease',
+                                whiteSpace: 'nowrap'
+                            }}
+                            onMouseEnter={(e) => {
+                                e.currentTarget.style.background = 'linear-gradient(135deg, rgba(239, 68, 68, 0.25), rgba(239, 68, 68, 0.1))'
+                                e.currentTarget.style.transform = 'translateY(-1px)'
+                            }}
+                            onMouseLeave={(e) => {
+                                e.currentTarget.style.background = 'linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(239, 68, 68, 0.05))'
+                                e.currentTarget.style.transform = 'translateY(0)'
+                            }}
+                            title="Reset to current month"
+                        >
+                            <X size={16} /> Clear
+                        </button>
+                    )}
 
                     <div className="export-dropdown" ref={exportMenuRef}>
                         <button
