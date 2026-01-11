@@ -1,4 +1,3 @@
-import { supabase } from './supabase'
 import { getOrders, getExpenses, getInventory } from './storage'
 
 const uniqDuplicates = (arr) => {
@@ -140,32 +139,7 @@ export async function runDataHealthCheck({ uiOrders = [], uiExpenses = [], uiInv
   pushSync('expenses', expenseSync)
   pushSync('inventory', invSync)
 
-  // Schema presence check (best-effort): detect missing columns that app expects
-  // We read a single row and look for keys; absence can mean "no rows" so we only warn if rows exist.
-  const schemaChecks = []
-  const checkColumns = async (table, expectedColumns) => {
-    const { data, error } = await supabase.from(table).select('*').limit(1)
-    if (error) {
-      report.issues.schema.push({ table, error: error.message || String(error) })
-      return
-    }
-    if (!data || data.length === 0) return
-    const row = data[0] || {}
-    const missing = expectedColumns.filter(c => !(c in row))
-    if (missing.length) {
-      schemaChecks.push({ table, missing })
-    }
-  }
-
-  await Promise.all([
-    checkColumns('orders', ['order_date', 'dispatch_date', 'order_source']),
-    checkColumns('expenses', ['inventory_item_id']),
-    checkColumns('inventory', ['item_name', 'current_stock', 'reorder_level', 'unit_cost'])
-  ])
-
-  if (schemaChecks.length) {
-    report.issues.schema.push(...schemaChecks)
-  }
+  // Schema check removed as we are now using Dexie.js (No-SQL-ish) and schema is defined in code.
 
   // Final ok flag
   const hasAnyIssues = Object.values(report.issues).some(arr => (arr || []).length > 0)
@@ -173,5 +147,3 @@ export async function runDataHealthCheck({ uiOrders = [], uiExpenses = [], uiInv
   report.finishedAt = new Date().toISOString()
   return report
 }
-
-

@@ -28,3 +28,7 @@ dist-ssr
 *.sw?
 
 .vite
+release
+build
+android/app/build
+android/app/src/main/assets/public

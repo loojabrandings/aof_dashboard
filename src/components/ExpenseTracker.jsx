@@ -1,21 +1,32 @@
 import { useState, useMemo, useEffect } from 'react'
 import { Plus, Edit, Trash2, Filter } from 'lucide-react'
+import CustomDropdown from './Common/CustomDropdown'
+import CollapsibleDateFilter from './Common/CollapsibleDateFilter'
 import ExpenseForm from './ExpenseForm'
 import { saveExpenses } from '../utils/storage'
 import { getMonthlyExpenses, getCategoryBreakdown } from '../utils/calculations'
 import { formatCurrency } from '../utils/reportUtils'
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts'
-import { COLORS, CustomTooltip, chartTheme, DonutCenterText, renderDonutLabel } from './Reports/ChartConfig'
+import BaseDonutChart from './Common/Charts/BaseDonutChart'
+import { COLORS } from './Reports/ChartConfig'
 import ConfirmationModal from './ConfirmationModal'
+import Pagination from './Common/Pagination'
 import { useToast } from './Toast/ToastContext'
+import ProFeatureLock from './ProFeatureLock'
+import { useLicensing } from './LicensingContext'
+import { format, startOfMonth, endOfMonth, parse, isWithinInterval } from 'date-fns'
 
 const ExpenseTracker = ({ expenses, onUpdateExpenses, triggerFormOpen, inventory, onUpdateInventory }) => {
   const { addToast } = useToast()
+  const { isFreeUser } = useLicensing()
   const [showForm, setShowForm] = useState(false)
   const [editingExpense, setEditingExpense] = useState(null)
   const [categoryFilter, setCategoryFilter] = useState('all')
 
-  const [dateFilter, setDateFilter] = useState('all')
+  // Date Filter State
+  const [filterType, setFilterType] = useState(() => localStorage.getItem('aof_expenses_filter_type') || 'month')
+  const [selectedMonth, setSelectedMonth] = useState(() => localStorage.getItem('aof_expenses_selected_month') || format(new Date(), 'yyyy-MM'))
+  const [startDate, setStartDate] = useState(() => localStorage.getItem('aof_expenses_start_date') || format(startOfMonth(new Date()), 'yyyy-MM-dd'))
+  const [endDate, setEndDate] = useState(() => localStorage.getItem('aof_expenses_end_date') || format(endOfMonth(new Date()), 'yyyy-MM-dd'))
 
   // Modal State
   const [modalConfig, setModalConfig] = useState({
@@ -62,6 +73,23 @@ const ExpenseTracker = ({ expenses, onUpdateExpenses, triggerFormOpen, inventory
     }
   }, [triggerFormOpen])
 
+  // Persist date filter state
+  useEffect(() => {
+    localStorage.setItem('aof_expenses_filter_type', filterType)
+  }, [filterType])
+
+  useEffect(() => {
+    localStorage.setItem('aof_expenses_selected_month', selectedMonth)
+  }, [selectedMonth])
+
+  useEffect(() => {
+    localStorage.setItem('aof_expenses_start_date', startDate)
+  }, [startDate])
+
+  useEffect(() => {
+    localStorage.setItem('aof_expenses_end_date', endDate)
+  }, [endDate])
+
   const currentDate = new Date()
   const currentMonth = currentDate.getMonth()
   const currentYear = currentDate.getFullYear()
@@ -81,21 +109,36 @@ const ExpenseTracker = ({ expenses, onUpdateExpenses, triggerFormOpen, inventory
       filtered = filtered.filter(expense => expense.category === categoryFilter)
     }
 
-    if (dateFilter === 'month') {
-      filtered = filtered.filter(expense => {
-        const expenseDate = new Date(expense.date)
-        return expenseDate.getMonth() === currentMonth &&
-          expenseDate.getFullYear() === currentYear
-      })
-    } else if (dateFilter === 'year') {
-      filtered = filtered.filter(expense => {
-        const expenseDate = new Date(expense.date)
-        return expenseDate.getFullYear() === currentYear
-      })
-    }
+    // Date filtering
+    filtered = filtered.filter(expense => {
+      if (!expense.date) return true
+      try {
+        const expenseDate = parse(expense.date, 'yyyy-MM-dd', new Date())
+
+        if (filterType === 'month') {
+          const monthStart = startOfMonth(parse(selectedMonth, 'yyyy-MM', new Date()))
+          const monthEnd = endOfMonth(parse(selectedMonth, 'yyyy-MM', new Date()))
+          return isWithinInterval(expenseDate, { start: monthStart, end: monthEnd })
+        } else {
+          const rangeStart = parse(startDate, 'yyyy-MM-dd', new Date())
+          const rangeEnd = parse(endDate, 'yyyy-MM-dd', new Date())
+          return isWithinInterval(expenseDate, { start: rangeStart, end: rangeEnd })
+        }
+      } catch (error) {
+        return true
+      }
+    })
 
     return filtered.sort((a, b) => new Date(b.date) - new Date(a.date))
-  }, [expenses, categoryFilter, dateFilter, currentMonth, currentYear])
+  }, [expenses, categoryFilter, filterType, selectedMonth, startDate, endDate])
+
+  const [currentPage, setCurrentPage] = useState(1)
+  const [itemsPerPage, setItemsPerPage] = useState(20)
+
+  const currentExpenses = useMemo(() => {
+    const start = (currentPage - 1) * itemsPerPage
+    return filteredExpenses.slice(start, start + itemsPerPage)
+  }, [filteredExpenses, currentPage])
 
   const monthlyTotal = monthlyExpenses.reduce((sum, expense) => sum + (expense.amount || 0), 0)
 
@@ -181,7 +224,7 @@ const ExpenseTracker = ({ expenses, onUpdateExpenses, triggerFormOpen, inventory
     setShowForm(true)
   }
 
-  return (
+  const content = (
     <div>
       <style>{`
         @media (max-width: 600px) {
@@ -245,12 +288,7 @@ const ExpenseTracker = ({ expenses, onUpdateExpenses, triggerFormOpen, inventory
         marginBottom: '2rem'
       }}>
         <div>
-          <h1 style={{
-            fontSize: '1.75rem',
-            fontWeight: 700,
-            color: 'var(--text-primary)',
-            marginBottom: '0.5rem'
-          }}>
+          <h1 style={{ marginBottom: '0.5rem' }}>
             Expense Tracker
           </h1>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
@@ -276,32 +314,42 @@ const ExpenseTracker = ({ expenses, onUpdateExpenses, triggerFormOpen, inventory
         display: 'flex',
         gap: '1rem',
         marginBottom: '2rem',
-        flexWrap: 'wrap'
+        flexWrap: 'wrap',
+        alignItems: 'center'
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1, minWidth: '150px' }}>
-          <Filter size={18} color="var(--text-muted)" />
-          <select
+        <div style={{ flex: 1, minWidth: '150px' }}>
+          <CustomDropdown
+            options={[
+              { value: 'all', label: 'All Categories' },
+              { value: 'Material', label: 'Material' },
+              { value: 'Operational', label: 'Operational' },
+              { value: 'Transport', label: 'Transport' },
+              { value: 'Utilities', label: 'Utilities' },
+              { value: 'Other', label: 'Other' }
+            ]}
             value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
-            style={{ width: '100%' }}
-          >
-            <option value="all">All Categories</option>
-            <option value="Material">Material</option>
-            <option value="Operational">Operational</option>
-            <option value="Transport">Transport</option>
-            <option value="Utilities">Utilities</option>
-            <option value="Other">Other</option>
-          </select>
+            onChange={setCategoryFilter}
+          />
         </div>
-        <select
-          value={dateFilter}
-          onChange={(e) => setDateFilter(e.target.value)}
-          style={{ flex: 1, minWidth: '150px' }}
-        >
-          <option value="all">All Time</option>
-          <option value="month">This Month</option>
-          <option value="year">This Year</option>
-        </select>
+        <CollapsibleDateFilter
+          filterType={filterType}
+          onFilterTypeChange={setFilterType}
+          selectedMonth={selectedMonth}
+          onMonthChange={setSelectedMonth}
+          startDate={startDate}
+          endDate={endDate}
+          onRangeChange={({ startDate: newStart, endDate: newEnd }) => {
+            if (newStart) setStartDate(newStart)
+            if (newEnd) setEndDate(newEnd)
+          }}
+          onReset={() => {
+            setFilterType('month')
+            setSelectedMonth(format(new Date(), 'yyyy-MM'))
+            setStartDate(format(startOfMonth(new Date()), 'yyyy-MM-dd'))
+            setEndDate(format(endOfMonth(new Date()), 'yyyy-MM-dd'))
+          }}
+          align="right"
+        />
       </div>
 
       {/* Summary Cards */}
@@ -368,30 +416,12 @@ const ExpenseTracker = ({ expenses, onUpdateExpenses, triggerFormOpen, inventory
             </p>
           ) : (
             <div style={{ width: '100%', height: 300 }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Tooltip content={<CustomTooltip />} />
-                  <Pie
-                    data={pieChartData}
-                    cx="50%"
-                    cy="50%"
-                    {...chartTheme.donut}
-                    dataKey="value"
-                    label={renderDonutLabel}
-                    labelLine={false}
-                  >
-                    {pieChartData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <DonutCenterText
-                    cx="50%"
-                    cy="50%"
-                    label="Monthly Total"
-                    value={formatCurrency(monthlyTotal)}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
+              <BaseDonutChart
+                data={pieChartData}
+                centerLabel="Monthly Total"
+                centerValue={formatCurrency(monthlyTotal)}
+                height={300}
+              />
             </div>
           )}
         </div>
@@ -419,7 +449,7 @@ const ExpenseTracker = ({ expenses, onUpdateExpenses, triggerFormOpen, inventory
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredExpenses.map((expense) => (
+                  {currentExpenses.map((expense) => (
                     <tr key={expense.id}>
                       <td>{new Date(expense.date).toLocaleDateString('en-IN')}</td>
                       <td style={{ fontWeight: 500 }}>{expense.item || expense.description}</td>
@@ -466,7 +496,7 @@ const ExpenseTracker = ({ expenses, onUpdateExpenses, triggerFormOpen, inventory
             </div>
 
             <div className="expense-mobile-list" style={{ padding: '1rem' }}>
-              {filteredExpenses.map((expense) => (
+              {currentExpenses.map((expense) => (
                 <div key={expense.id + '-mobile'} className="expense-mobile-card">
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
                     <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{expense.item || expense.description}</div>
@@ -497,6 +527,16 @@ const ExpenseTracker = ({ expenses, onUpdateExpenses, triggerFormOpen, inventory
                 </div>
               ))}
             </div>
+            {filteredExpenses.length > 0 && (
+              <Pagination
+                currentPage={currentPage}
+                totalPages={Math.ceil(filteredExpenses.length / itemsPerPage)}
+                onPageChange={setCurrentPage}
+                totalItems={filteredExpenses.length}
+                itemsPerPage={itemsPerPage}
+                onItemsPerPageChange={setItemsPerPage}
+              />
+            )}
           </>
         )}
       </div>
@@ -526,7 +566,26 @@ const ExpenseTracker = ({ expenses, onUpdateExpenses, triggerFormOpen, inventory
       />
     </div>
   )
+
+  // If Free user, wrap with ProFeatureLock
+  if (isFreeUser) {
+    return (
+      <ProFeatureLock
+        featureName="Expense Tracking"
+        showContent={false}
+        features={[
+          "Comprehensive Expense Logging",
+          "Category-wise Spending Breakdown",
+          "Monthly Cost Analysis Charts",
+          "Linked Inventory Cost Tracking"
+        ]}
+      >
+        {content}
+      </ProFeatureLock>
+    )
+  }
+
+  return content
 }
 
 export default ExpenseTracker
-

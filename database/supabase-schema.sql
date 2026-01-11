@@ -1,4 +1,4 @@
--- Art Of Frames Management System - Supabase Database Schema
+-- AOF Biz - Managment App - Supabase Database Schema
 -- Run this SQL in your Supabase SQL Editor to create all tables
 
 -- Orders Table

@@ -1,4 +1,6 @@
-const SummaryCard = ({ title, value, icon: Icon, color = 'var(--accent-primary)', subtitle, onClick, disabled = false }) => {
+import { ArrowUpRight, ArrowDownRight } from 'lucide-react'
+
+const SummaryCard = ({ title, value, icon: Icon, color = 'var(--accent-primary)', subtitle, trend, onClick, disabled = false }) => {
   const isError = color === 'var(--error)' && !disabled
   const isClickable = onClick && !disabled
 
@@ -23,6 +25,13 @@ const SummaryCard = ({ title, value, icon: Icon, color = 'var(--accent-primary)'
     <div
       className="card"
       onClick={isClickable ? onClick : undefined}
+      onKeyDown={(e) => {
+        if (isClickable && (e.key === 'Enter' || e.key === ' ')) {
+          e.preventDefault()
+          onClick()
+        }
+      }}
+      tabIndex={isClickable ? 0 : -1}
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -69,14 +78,14 @@ const SummaryCard = ({ title, value, icon: Icon, color = 'var(--accent-primary)'
         )}
       </div>
       <div style={{ flex: 1 }}>
-        <p style={{
+        <div style={{
           fontSize: '0.875rem',
           color: 'var(--text-muted)',
           marginBottom: '0.25rem',
           fontWeight: isError ? 600 : 400
         }}>
           {title}
-        </p>
+        </div>
         <h3 style={{
           fontSize: '1.5rem',
           fontWeight: 700,
@@ -84,15 +93,41 @@ const SummaryCard = ({ title, value, icon: Icon, color = 'var(--accent-primary)'
         }}>
           {value}
         </h3>
-        {!disabled && subtitle && (
-          <p style={{
+
+        {trend && !disabled ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', marginTop: '0.25rem' }}>
+            {subtitle && (
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                {subtitle}
+              </div>
+            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <span style={{
+                display: 'flex',
+                alignItems: 'center',
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                color: trend.isPositive ? 'var(--success)' : 'var(--error)',
+                backgroundColor: trend.isPositive ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                padding: '2px 6px',
+                borderRadius: '4px'
+              }}>
+                {trend.isPositive ? <ArrowUpRight size={12} style={{ marginRight: '2px' }} /> : <ArrowDownRight size={12} style={{ marginRight: '2px' }} />}
+                {Math.abs(trend.value)}%
+              </span>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{trend.label}</span>
+            </div>
+          </div>
+        ) : subtitle && (
+          <div style={{
             fontSize: '0.75rem',
-            color: isError ? 'rgba(239, 68, 68, 0.8)' : 'var(--text-muted)',
+            color: disabled ? 'var(--text-muted)' : (isError ? 'rgba(239, 68, 68, 0.8)' : 'var(--text-muted)'),
             marginTop: '0.25rem',
-            fontWeight: isError ? 500 : 400
+            fontWeight: isError ? 500 : 400,
+            opacity: disabled ? 0.6 : 1
           }}>
             {subtitle}
-          </p>
+          </div>
         )}
       </div>
     </div>

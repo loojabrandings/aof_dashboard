@@ -2,17 +2,20 @@ import { useEffect, useRef } from 'react'
 import { getSettings } from '../utils/storage'
 import { curfoxService } from '../utils/curfox'
 import { useToast } from './Toast/ToastContext'
+import { useLicensing } from './LicensingContext'
 
 const CACHE_KEY_PREFIX = 'curfox_cache_'
 const CACHE_DURATION = 7 * 24 * 60 * 60 * 1000 // 7 Days
 
 const CurfoxAuthHandler = ({ session }) => {
     const { addToast } = useToast()
+    const { isFreeUser } = useLicensing()
     const hasChecked = useRef(false)
 
     useEffect(() => {
         // Only run once per session load, avoid duplicate checks on re-renders
-        if (!session || hasChecked.current) return
+        // Also skip if Free User
+        if (!session || hasChecked.current || isFreeUser) return
 
         const checkCurfoxConnection = async () => {
             hasChecked.current = true

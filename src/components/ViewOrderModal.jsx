@@ -1,16 +1,20 @@
 import { useState, useEffect } from 'react'
-import { X, Download, MessageCircle, Star } from 'lucide-react'
+import { X, Download, MessageCircle, Star, Crown, Truck, RefreshCw, MapPin, CheckCircle } from 'lucide-react'
+import CustomDropdown from './Common/CustomDropdown'
 import { getProducts, getSettings } from '../utils/storage'
 import { formatWhatsAppNumber, generateWhatsAppMessage } from '../utils/whatsapp'
+import { getPrintStyles } from './PrintStyles'
 
 import TrackingNumberModal from './TrackingNumberModal'
 import DispatchModal from './DispatchModal'
 import ConfirmationModal from './ConfirmationModal'
 import { curfoxService } from '../utils/curfox'
 import { useToast } from './Toast/ToastContext'
+import { useLicensing } from './LicensingContext'
 
 const ViewOrderModal = ({ order, customerOrderCount = 1, onClose, onSave, onRequestTrackingNumber, onRequestDispatch }) => {
   const { addToast } = useToast()
+  const { isFreeUser } = useLicensing()
   const [products, setProducts] = useState({ categories: [] })
   const [localOrder, setLocalOrder] = useState(order)
   const [showTrackingModal, setShowTrackingModal] = useState(false)
@@ -21,6 +25,8 @@ const ViewOrderModal = ({ order, customerOrderCount = 1, onClose, onSave, onRequ
 
   const [trackingHistory, setTrackingHistory] = useState([])
   const [loadingTracking, setLoadingTracking] = useState(false)
+  const [financeData, setFinanceData] = useState(null)
+  const [financeLoading, setFinanceLoading] = useState(false)
 
   // Modal State
   const [modalConfig, setModalConfig] = useState({
@@ -29,8 +35,31 @@ const ViewOrderModal = ({ order, customerOrderCount = 1, onClose, onSave, onRequ
     title: '',
     message: '',
     onConfirm: null,
-    isAlert: false
+    isAlert: false,
+    confirmText: 'Confirm',
+    cancelText: 'Cancel',
+    extraButtonText: null,
+    onExtraButtonClick: null,
+    extraButtonDisabled: false,
+    confirmDisabled: false
   })
+
+  const showConfirm = (title, message, onConfirm, type = 'default', confirmText = 'Confirm', options = {}) => {
+    setModalConfig({
+      isOpen: true,
+      type,
+      title,
+      message,
+      onConfirm,
+      isAlert: false,
+      confirmText,
+      cancelText: options.cancelText || 'Cancel',
+      extraButtonText: options.extraButtonText,
+      onExtraButtonClick: options.onExtraButtonClick,
+      extraButtonDisabled: options.extraButtonDisabled,
+      confirmDisabled: options.confirmDisabled
+    })
+  }
 
   const showAlert = (title, message, type = 'default') => {
     setModalConfig({
@@ -79,27 +108,37 @@ const ViewOrderModal = ({ order, customerOrderCount = 1, onClose, onSave, onRequ
     }
   }, [order])
 
-  // Load Tracking History
+  // Load Tracking & Finance Data
   useEffect(() => {
-    const fetchTracking = async () => {
+    const fetchTrackingAndFinance = async () => {
       if (localOrder?.trackingNumber && settings?.curfox?.enabled) {
         setLoadingTracking(true)
+        setFinanceLoading(true)
         try {
-          // Pass settings.curfox implicitly or explicitly if service needs it? 
-          // Previous impl of service didn't use settings for GET, but assuming it might need auth
-          // For now, service.getTracking(waybill, authData)
-          const history = await curfoxService.getTracking(localOrder.trackingNumber, settings.curfox)
+          const authData = {
+            tenant: settings.curfox.tenant,
+            token: (await curfoxService.login(settings.curfox.email, settings.curfox.password, settings.curfox.tenant))?.token
+          }
+          if (!authData.token) throw new Error("Could not authenticate with Curfox")
+
+          // Fetch tracking
+          const history = await curfoxService.getTracking(localOrder.trackingNumber, authData)
           if (Array.isArray(history)) {
             setTrackingHistory(history)
           }
+
+          // Fetch finance
+          const fData = await curfoxService.getFinanceStatus(localOrder.trackingNumber, authData)
+          setFinanceData(fData)
         } catch (error) {
-          console.error("Error fetching tracking:", error)
+          console.error("Error fetching tracking/finance:", error)
         } finally {
           setLoadingTracking(false)
+          setFinanceLoading(false)
         }
       }
     }
-    fetchTracking()
+    fetchTrackingAndFinance()
   }, [localOrder?.trackingNumber, settings])
 
 
@@ -115,6 +154,18 @@ const ViewOrderModal = ({ order, customerOrderCount = 1, onClose, onSave, onRequ
     if (typeof val === 'string') return val
     if (typeof val === 'object' && val.name) return val.name
     return String(val)
+  }
+
+  // Helper to safely format dates
+  const formatSafeDate = (dateVal) => {
+    if (!dateVal) return 'N/A'
+    try {
+      const d = new Date(dateVal)
+      if (isNaN(d.getTime())) return 'N/A'
+      return d.toLocaleString()
+    } catch {
+      return 'N/A'
+    }
   }
 
   // Get category and item names with safety checks
@@ -194,7 +245,49 @@ const ViewOrderModal = ({ order, customerOrderCount = 1, onClose, onSave, onRequ
       return
     }
 
-    // If status changes to Dispatched and there's no tracking number, open dispatch modal (captures dispatch date + tracking)
+    // If status changes to Dispatched and Curfox is enabled, trigger choice modal
+    if (field === 'status' && newValue === 'Dispatched' && settings?.curfox?.enabled) {
+      const isCurfoxConnected = settings.curfox.email && settings.curfox.password && settings.curfox.tenant;
+      const today = new Date().toISOString().split('T')[0]
+
+      showConfirm(
+        'Dispatch Order',
+        'How would you like to handle this dispatch?',
+        async () => { // Confirm = Send to Courier
+          // Logic to handle Curfox dispatch (similar to OrderManagement but locally managed or via prop)
+          // For simplicity, within ViewOrderModal, we can just call handleCurfoxDispatch logic if we had it, 
+          // or reuse the same logic pattern.
+          try {
+            const authResponse = await curfoxService.login(settings.curfox.email, settings.curfox.password, settings.curfox.tenant)
+            const authPayload = { ...settings.curfox, token: authResponse.token, businessId: settings.curfox.businessId || authResponse.businessId }
+            await curfoxService.createOrder(localOrder, localOrder.trackingNumber, authPayload)
+
+            const updatedOrder = { ...localOrder, status: 'Dispatched', dispatchDate: today }
+            setLocalOrder(updatedOrder)
+            if (onSave) await onSave(updatedOrder)
+            addToast('Order dispatched to Curfox successfully', 'success')
+          } catch (error) {
+            addToast('Curfox Dispatch Failed: ' + error.message, 'error')
+          }
+        },
+        'default',
+        'Send to Courier',
+        {
+          cancelText: 'Cancel',
+          extraButtonText: 'Dispatch Locally',
+          onExtraButtonClick: async () => {
+            const updatedOrder = { ...localOrder, status: 'Dispatched', dispatchDate: today }
+            setLocalOrder(updatedOrder)
+            if (onSave) await onSave(updatedOrder)
+            addToast('Order marked as Dispatched locally', 'success')
+          },
+          confirmDisabled: !isCurfoxConnected || !localOrder?.trackingNumber
+        }
+      )
+      return
+    }
+
+    // If status changes to Dispatched and there's no tracking number (and NOT handled by Curfox above)
     if (field === 'status' && newValue === 'Dispatched' && !localOrder?.trackingNumber) {
       if (onRequestDispatch) {
         onRequestDispatch({ ...localOrder, status: 'Dispatched' })
@@ -212,6 +305,34 @@ const ViewOrderModal = ({ order, customerOrderCount = 1, onClose, onSave, onRequ
     setLocalOrder(updatedOrder)
     if (onSave) {
       await onSave(updatedOrder)
+    }
+  }
+
+  // Sync Finance Data to Order
+  const handleSyncFinance = async () => {
+    if (!financeData || !onSave) return
+    try {
+      setFinanceLoading(true)
+      const updatedOrder = {
+        ...localOrder,
+        courierFinanceStatus: financeData.finance_status,
+        courierInvoiceNo: financeData.invoice_no,
+        courierInvoiceRef: financeData.invoice_ref_no
+      }
+
+      // Auto-mark as paid if deposited or approved
+      if (financeData.finance_status === 'Deposited' || financeData.finance_status === 'Approved') {
+        updatedOrder.paymentStatus = 'Paid'
+      }
+
+      setLocalOrder(updatedOrder)
+      await onSave(updatedOrder)
+      addToast('Finance data synced to order', 'success')
+    } catch (err) {
+      console.error("Sync Finance Error:", err)
+      addToast('Failed to sync finance data', 'error')
+    } finally {
+      setFinanceLoading(false)
     }
   }
 
@@ -239,6 +360,29 @@ const ViewOrderModal = ({ order, customerOrderCount = 1, onClose, onSave, onRequ
         .replace(/'/g, "&#039;")
     }
 
+    // Default logo as inline SVG data URI (works in Blob URL context)
+    const defaultLogoSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 720" width="90" height="90">
+      <style>.st0{fill:#FF2E36;}</style>
+      <g><g><path class="st0" d="M445.85,161l22.29,22.29h66.21v66.2l22.29,22.29V161H445.85z M534.35,450.78v66.19h-66.2l-22.29,22.29h110.77V428.49L534.35,450.78z M200.66,516.97v-66.19l-22.29-22.29v110.77h110.77l-22.29-22.29H200.66z M178.38,161v110.77l22.29-22.29v-66.2h66.21L289.17,161H178.38z"/></g><path class="st0" d="M414.24,422.57c22.15,0,43.63,16.02,43.63,51.88c0,58.77-90.35,107.57-90.35,107.57s-90.35-48.8-90.35-107.57c0-35.87,21.47-51.89,43.63-51.88c20.45,0,41.48,13.65,46.73,37.94C372.75,436.22,393.78,422.57,414.24,422.57"/></g><g><path d="M257.13,290.04h21.23l42.29,109.97H298.9l-8.6-22.65h-44.87l-8.95,22.65h-21.75L257.13,290.04z M267.88,319.2l-14.75,37.75h29.42L267.88,319.2z"/><path d="M388.76,287.28c15.56,0,28.94,5.63,40.13,16.89c11.2,11.26,16.79,24.99,16.79,41.19c0,16.05-5.52,29.63-16.57,40.74c-11.05,11.11-24.45,16.67-40.21,16.67c-16.51,0-30.22-5.71-41.14-17.12c-10.92-11.41-16.38-24.97-16.38-40.67c0-10.51,2.54-20.18,7.63-29.01c5.09-8.82,12.08-15.81,20.98-20.97C368.9,289.86,378.48,287.28,388.76,287.28z M388.53,307.76c-10.18,0-18.74,3.54-25.67,10.62c-6.93,7.08-10.4,16.07-10.4,26.99c0,12.16,4.36,21.78,13.1,28.86c6.78,5.53,14.57,8.3,23.35,8.3c9.93,0,18.38-3.59,25.37-10.76c6.98-7.18,10.48-16.02,10.48-26.54c0-10.47-3.52-19.32-10.55-26.58C407.17,311.39,398.61,307.76,388.53,307.76z"/><path d="M465.72,290.04h54.57v20.41H486.5v19.96h33.79v20.11H486.5v49.49h-20.78V290.04z"/></g><g><path d="M307.91,186.2h15.23c6.13,0,10.84,0.73,14.13,2.18c3.29,1.45,5.89,3.69,7.8,6.7c1.91,3.01,2.86,6.36,2.86,10.03c0,3.43-0.84,6.56-2.51,9.38c-1.67,2.82-4.13,5.1-7.37,6.86c4.02,1.37,7.11,2.97,9.27,4.81c2.16,1.84,3.85,4.06,5.05,6.67c1.21,2.61,1.81,5.44,1.81,8.48c0,6.2-2.27,11.44-6.8,15.73c-4.54,4.29-10.62,6.44-18.26,6.44h-21.22V186.2z M315.47,193.76v24.74h4.42c5.37,0,9.32-0.5,11.85-1.5c2.53-1,4.53-2.57,6-4.73c1.47-2.15,2.21-4.54,2.21-7.17c0-3.54-1.24-6.31-3.71-8.33c-2.47-2.01-6.41-3.02-11.82-3.02H315.47z M315.47,226.28v29.63h9.58c5.65,0,9.79-0.55,12.42-1.65c2.63-1.1,4.74-2.83,6.34-5.17c1.6-2.35,2.39-4.89,2.39-7.62c0-3.43-1.12-6.43-3.37-8.98c-2.24-2.56-5.33-4.31-9.26-5.25c-2.63-0.63-7.21-0.95-13.74-0.95H315.47z"/><path d="M370.82,182.78c1.67,0,3.1,0.6,4.29,1.79c1.19,1.19,1.78,2.63,1.78,4.31c0,1.65-0.59,3.06-1.78,4.26c-1.19,1.19-2.62,1.79-4.29,1.79c-1.64,0-3.05-0.6-4.24-1.79c-1.19-1.19-1.78-2.61-1.78-4.26c0-1.68,0.59-3.12,1.78-4.31C367.77,183.38,369.18,182.78,370.82,182.78z M367.17,206.32h7.36v57.16h-7.36V206.32z"/><path d="M385.13,206.32h41.98l-32.36,50.64h31.31v6.51h-43.97l32.33-50.7h-29.29V206.32z"/></g>
+    </svg>`
+
+    // Business Info Logic
+    const defaultName = 'AOF Biz - Managment App'
+    const defaultTagline = 'From Chaos To Clarity.'
+
+    const bizName = isFreeUser ? defaultName : (settings?.businessName || defaultName)
+    const bizTagline = isFreeUser ? defaultTagline : (settings?.businessTagline || defaultTagline)
+    const bizLogo = (!isFreeUser && settings?.businessLogo) ? settings.businessLogo : null
+
+    // Contact Info HTML
+    let contactHtml = ''
+    if (!isFreeUser) {
+      if (settings?.businessAddress) contactHtml += `<p>${escapeHtml(settings.businessAddress)}</p>`
+      if (settings?.businessPhone) contactHtml += `<p><strong>Tel:</strong> ${escapeHtml(settings.businessPhone)}</p>`
+      if (settings?.businessEmail) contactHtml += `<p><strong>Email:</strong> ${escapeHtml(settings.businessEmail)}</p>`
+      if (settings?.businessWebsite) contactHtml += `<p><strong>Web:</strong> ${escapeHtml(settings.businessWebsite)}</p>`
+    }
+
     const invoiceRows = orderItems.map((it, idx) => {
       const catName = escapeHtml(getCategoryName(it.categoryId))
       const itName = escapeHtml(getItemName(it))
@@ -262,6 +406,7 @@ const ViewOrderModal = ({ order, customerOrderCount = 1, onClose, onSave, onRequ
       `
     }).join('')
 
+    const pageSize = settings?.general?.defaultPageSize || 'A4'
     // Create invoice HTML
     const invoiceHTML = `
 <!DOCTYPE html>
@@ -269,212 +414,7 @@ const ViewOrderModal = ({ order, customerOrderCount = 1, onClose, onSave, onRequ
 <head>
   <title>Invoice - Order #${escapeHtml(order.id)}</title>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-    
-    body {
-      font-family: 'Inter', sans-serif;
-      margin: 0;
-      padding: 0;
-      color: #333;
-      font-size: 14px;
-      line-height: 1.5;
-      -webkit-print-color-adjust: exact;
-    }
-    
-    @media print {
-      body { margin: 0; }
-      @page { margin: 1cm; size: A4; }
-      .no-print { display: none; }
-    }
-
-    .container {
-      max-width: 800px;
-      margin: 0 auto;
-      padding: 40px;
-    }
-
-    /* Header */
-    .header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 40px;
-      border-bottom: 2px solid #FF2E36;
-      padding-bottom: 20px;
-    }
-
-    .brand-section {
-      display: flex;
-      align-items: center;
-      gap: 15px;
-    }
-
-    .logo svg {
-      width: 90px;
-      height: 90px;
-    }
-
-    .company-info h1 {
-      margin: 0;
-      font-size: 24px;
-      font-weight: 700;
-      color: #FF2E36;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-
-    .company-info .tagline {
-      margin: 2px 0 0;
-      font-size: 14px;
-      color: #666;
-      font-weight: 500;
-      letter-spacing: 1px;
-    }
-
-    .contact-info {
-      text-align: right;
-      font-size: 13px;
-      color: #555;
-    }
-
-    .contact-info p {
-      margin: 2px 0;
-    }
-
-    .contact-info strong {
-      color: #333;
-    }
-
-    /* Invoice Info Grid */
-    .info-grid {
-      display: flex;
-      justify-content: space-between;
-      margin-bottom: 40px;
-      gap: 40px;
-    }
-
-    .info-column {
-      flex: 1;
-    }
-
-    .section-title {
-      font-size: 12px;
-      font-weight: 700;
-      text-transform: uppercase;
-      color: #999;
-      margin-bottom: 10px;
-      letter-spacing: 0.5px;
-    }
-
-    .details-table {
-      width: 100%;
-      border-collapse: collapse;
-    }
-
-    .details-table td {
-      padding: 3px 0;
-      vertical-align: top;
-    }
-
-    .label-col {
-      width: 100px;
-      color: #666;
-      font-weight: 500;
-    }
-
-    .sep-col {
-      width: 15px;
-      color: #999;
-      text-align: center;
-    }
-
-    .value-col {
-      font-weight: 600;
-      color: #333;
-    }
-
-    /* Items Table */
-    .items-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-bottom: 30px;
-    }
-
-    .items-table th {
-      background-color: #f9f9f9;
-      color: #666;
-      font-weight: 600;
-      text-transform: uppercase;
-      font-size: 12px;
-      padding: 12px 15px;
-      text-align: left;
-      border-bottom: 1px solid #eee;
-    }
-
-    .items-table td {
-      padding: 12px 15px;
-      border-bottom: 1px solid #eee;
-      color: #333;
-    }
-
-    .items-table tr:last-child td {
-      border-bottom: 1px solid #FF2E36;
-    }
-
-    .item-desc {
-      font-weight: 500;
-    }
-    
-    .item-notes {
-      font-size: 12px;
-      color: #777;
-      margin-top: 4px;
-    }
-
-    .text-right { text-align: right; }
-    .text-center { text-align: center; }
-
-    /* Totals Section */
-    .totals-container {
-      display: flex;
-      justify-content: flex-end;
-      margin-bottom: 40px;
-    }
-
-    .totals-box {
-      width: 300px;
-    }
-
-    .total-row {
-      display: flex;
-      justify-content: space-between;
-      padding: 6px 0;
-      font-size: 14px;
-    }
-
-    .total-row.final {
-      border-top: 2px solid #eee;
-      margin-top: 10px;
-      padding-top: 10px;
-      font-size: 16px;
-      font-weight: 700;
-      color: #FF2E36;
-    }
-
-    .total-label { color: #666; }
-    .total-value { font-weight: 600; }
-
-    /* Footer */
-    .footer {
-      text-align: center;
-      margin-top: 60px;
-      padding-top: 20px;
-      border-top: 1px solid #eee;
-      color: #888;
-      font-size: 12px;
-    }
-    
-    .footer p { margin: 4px 0; }
+    ${getPrintStyles(pageSize)}
   </style>
 </head>
 <body>
@@ -483,39 +423,15 @@ const ViewOrderModal = ({ order, customerOrderCount = 1, onClose, onSave, onRequ
     <div class="header">
       <div class="brand-section">
         <div class="logo">
-          <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 720" xml:space="preserve">
-            <style type="text/css">.st0{fill:#FF2E36;}.st1{fill:#000000;}</style>
-            <g>
-              <g><path class="st0" d="M437.25,161l22.29,22.29h66.21v66.2l22.29,22.29V161H437.25z M525.75,450.78v66.19h-66.2l-22.29,22.29h110.77V428.49L525.75,450.78z M192.07,516.97v-66.19l-22.29-22.29v110.77h110.77l-22.29-22.29H192.07z M169.78,161v110.77l22.29-22.29v-66.2h66.21L280.57,161H169.78z"/></g>
-              <g>
-                <g>
-                  <path class="st1" d="M121.9,302.47h47.3v17.69h-29.29v17.3h29.29v17.43h-29.29v42.9H121.9V302.47z"/>
-                  <path class="st1" d="M186.57,302.47h19.22c10.53,0,18.03,0.94,22.49,2.82s8.06,5,10.78,9.36c2.72,4.36,4.08,9.53,4.08,15.49c0,6.26-1.5,11.5-4.5,15.71c-3,4.21-7.53,7.4-13.57,9.56l22.58,42.38h-19.83l-21.43-40.37h-1.66v40.37h-18.14V302.47z M204.72,339.73h5.69c5.77,0,9.74-0.76,11.92-2.28c2.17-1.52,3.26-4.03,3.26-7.54c0-2.08-0.54-3.89-1.62-5.43c-1.08-1.54-2.52-2.64-4.33-3.32c-1.81-0.67-5.12-1.01-9.95-1.01h-4.97V339.73z"/>
-                  <path class="st1" d="M291.4,302.47h18.4l36.66,95.32h-18.86l-7.46-19.63h-38.89l-7.75,19.63h-18.86L291.4,302.47z M300.72,327.74l-12.79,32.72h25.5L300.72,327.74z"/>
-                  <path class="st1" d="M369.74,302.47h17.68l22.1,66.48l22.3-66.48h17.67l15.99,95.32h-17.54l-10.22-60.2l-20.25,60.2h-15.99l-20.07-60.2l-10.47,60.2h-17.69L369.74,302.47z"/>
-                  <path class="st1" d="M479.99,302.47h52.03v17.76H498v17.24h34.02v17.43H498v25.08h34.02v17.82h-52.03V302.47z"/>
-                  <path class="st1" d="M598.96,315.43l-13.44,11.86c-4.72-6.57-9.52-9.85-14.41-9.85c-2.38,0-4.33,0.64-5.84,1.91c-1.51,1.28-2.27,2.71-2.27,4.31c0,1.6,0.54,3.11,1.62,4.54c1.47,1.9,5.91,5.98,13.31,12.25c6.92,5.79,11.12,9.44,12.59,10.95c3.68,3.72,6.28,7.27,7.82,10.66c1.54,3.39,2.3,7.1,2.3,11.11c0,7.82-2.7,14.28-8.11,19.37c-5.41,5.1-12.46,7.65-21.15,7.65c-6.79,0-12.7-1.66-17.74-4.99s-9.35-8.55-12.94-15.68l15.25-9.2c4.59,8.43,9.87,12.64,15.84,12.64c3.11,0,5.73-0.91,7.85-2.72c2.12-1.81,3.18-3.91,3.18-6.28c0-2.16-0.8-4.32-2.4-6.48c-1.6-2.16-5.13-5.46-10.58-9.91c-10.39-8.47-17.09-15-20.12-19.6c-3.03-4.6-4.54-9.19-4.54-13.77c0-6.61,2.52-12.28,7.56-17.01c5.04-4.73,11.26-7.1,18.65-7.1c4.76,0,9.29,1.1,13.59,3.3C589.28,305.58,593.94,309.6,598.96,315.43z"/>
-                </g>
-                <g>
-                   <path class="st1" d="M245.27,217.2l28.9,61.98h-6.69l-9.75-20.39h-26.7l-9.66,20.39h-6.91l29.28-61.98H245.27z M244.49,230.37l-10.62,22.43h21.19L244.49,230.37z"/>
-                   <path class="st1" d="M284.12,217.2h12.35c6.88,0,11.54,0.28,13.99,0.84c3.68,0.84,6.67,2.65,8.97,5.42c2.3,2.77,3.45,6.18,3.45,10.23c0,3.38-0.79,6.34-2.38,8.9s-3.86,4.49-6.8,5.8c-2.95,1.31-7.02,1.98-12.22,2l22.29,28.78h-7.66l-22.29-28.78h-3.5v28.78h-6.19V217.2z M290.31,223.27v21.07l10.68,0.08c4.14,0,7.2-0.39,9.18-1.18c1.98-0.79,3.53-2.04,4.64-3.77c1.11-1.73,1.67-3.66,1.67-5.79c0-2.08-0.56-3.97-1.69-5.67c-1.13-1.7-2.6-2.91-4.43-3.64c-1.83-0.73-4.87-1.1-9.12-1.1H290.31z"/>
-                   <path class="st1" d="M330.51,223.27v-6.07h33.96v6.07h-13.82v55.91h-6.32v-55.91H330.51z"/>
-                   <path class="st1" d="M426.81,215.64c9.39,0,17.24,3.13,23.57,9.4c6.32,6.26,9.49,13.97,9.49,23.13c0,9.07-3.16,16.77-9.47,23.09s-14,9.48-23.08,9.48c-9.19,0-16.95-3.15-23.27-9.44c-6.32-6.29-9.49-13.9-9.49-22.84c0-5.95,1.44-11.47,4.32-16.56c2.88-5.08,6.81-9.07,11.78-11.95C415.63,217.08,421.02,215.64,426.81,215.64z M427.08,221.66c-4.59,0-8.93,1.2-13.04,3.58c-4.11,2.39-7.32,5.61-9.62,9.66c-2.31,4.05-3.46,8.56-3.46,13.54c0,7.37,2.55,13.59,7.66,18.66c5.11,5.07,11.26,7.61,18.46,7.61c4.81,0,9.26-1.17,13.36-3.5c4.09-2.33,7.29-5.52,9.58-9.57c2.29-4.05,3.44-8.55,3.44-13.49c0-4.92-1.15-9.37-3.44-13.35s-5.52-7.16-9.68-9.55C436.17,222.86,431.75,221.66,427.08,221.66z"/>
-                   <path class="st1" d="M472.29,217.2h31.05v6.07h-24.86v19.42h24.86v6.07h-24.86v30.42h-6.19V217.2z"/>
-                </g>
-              </g>
-              <path class="st0" d="M405.64,422.57c22.15,0,43.63,16.02,43.63,51.88c0,58.77-90.35,107.57-90.35,107.57s-90.35-48.8-90.35-107.57c0-35.87,21.47-51.89,43.63-51.88c20.45,0,41.48,13.65,46.73,37.94C364.15,436.22,385.18,422.57,405.64,422.57"/>
-            </g>
-          </svg>
+          ${bizLogo ? `<img src="${bizLogo}" alt="Logo" style="width: 90px; height: 90px; object-fit: contain;">` : defaultLogoSvg}
         </div>
         <div class="company-info">
-          <h1>Art Of Frames</h1>
-          <p class="tagline">Art that remembers</p>
+          <h1>${escapeHtml(bizName)}</h1>
+          <p class="tagline">${escapeHtml(bizTagline)}</p>
         </div>
       </div>
       <div class="contact-info">
-        <p><strong>Hotline:</strong></p>
-        <p style="font-size: 16px; font-weight: 700; color: #FF2E36;">+94 750 350 109</p>
+        ${contactHtml}
       </div>
     </div>
 
@@ -540,8 +456,8 @@ const ViewOrderModal = ({ order, customerOrderCount = 1, onClose, onSave, onRequ
           <tr><td class="label-col">Invoice No.</td><td class="sep-col">:</td><td class="value-col">#${escapeHtml(safeOrder.id)}</td></tr>
           <tr><td class="label-col">Date</td><td class="sep-col">:</td><td class="value-col">${escapeHtml(safeOrder.orderDate)}</td></tr>
           <tr><td class="label-col">Status</td><td class="sep-col">:</td><td class="value-col">${escapeHtml(safeOrder.status)}</td></tr>
-          <tr><td class="label-col">Payment</td><td class="sep-col">:</td><td class="value-col">${escapeHtml(safeOrder.paymentStatus)}</td></tr>
-          ${safeOrder.trackingNumber ? `<tr><td class="label-col">Tracking ID</td><td class="sep-col">:</td><td class="value-col">${escapeHtml(safeOrder.trackingNumber)}</td></tr>` : ''}
+          ${!isFreeUser ? `<tr><td class="label-col">Payment</td><td class="sep-col">:</td><td class="value-col">${escapeHtml(safeOrder.paymentStatus)}</td></tr>` : ''}
+          ${!isFreeUser && safeOrder.trackingNumber ? `<tr><td class="label-col">Tracking ID</td><td class="sep-col">:</td><td class="value-col">${escapeHtml(safeOrder.trackingNumber)}</td></tr>` : ''}
         </table>
       </div>
     </div>
@@ -586,7 +502,7 @@ const ViewOrderModal = ({ order, customerOrderCount = 1, onClose, onSave, onRequ
         </div>
         ` : ''}
         <div class="total-row final">
-          <span>${safeOrder.paymentMethod && safeOrder.paymentMethod.toLowerCase().includes('bank') ? 'Amount' : 'Amount Due (COD)'}</span>
+          <span>${isFreeUser ? 'Total' : (safeOrder.paymentMethod && safeOrder.paymentMethod.toLowerCase().includes('bank') ? 'Amount' : 'Amount Due (COD)')}</span>
           <span>Rs. ${codAmount.toFixed(2)}</span>
         </div>
       </div>
@@ -601,26 +517,36 @@ const ViewOrderModal = ({ order, customerOrderCount = 1, onClose, onSave, onRequ
 
     <!-- Footer -->
     <div class="footer">
-      <p>Thank you for your business!</p>
-      <p>Art Of Frames — Art that remembers</p>
+      <p>Powered by AOF Biz – A Professional Business Managment App</p>
     </div>
   </div>
+
+  <script>
+    window.onload = function() {
+      setTimeout(function() {
+        window.print();
+      }, 500);
+    };
+  </script>
 </body>
 </html>
     `
 
-    // Open invoice in new window
-    const printWindow = window.open('', '_blank')
-    if (printWindow) {
-      printWindow.document.write(invoiceHTML)
-      printWindow.document.close()
+    // Open invoice in new window using a Blob URL for better isolation
+    try {
+      const blob = new Blob([invoiceHTML], { type: 'text/html' })
+      const url = URL.createObjectURL(blob)
+      const printWindow = window.open(url, '_blank')
 
-      // Wait for content to load, then trigger print
-      setTimeout(() => {
-        printWindow.print()
-      }, 500)
-    } else {
-      addToast('Popup blocked. Please allow popups for this site.', 'error')
+      // Cleanup the URL after some time to ensure the window has loaded
+      setTimeout(() => URL.revokeObjectURL(url), 60000)
+
+      if (!printWindow) {
+        addToast('Popup blocked. Please allow popups for this site.', 'error')
+      }
+    } catch (error) {
+      console.error('Failed to generate preview:', error)
+      addToast('Failed to generate invoice preview', 'error')
     }
   }
 
@@ -683,25 +609,24 @@ const ViewOrderModal = ({ order, customerOrderCount = 1, onClose, onSave, onRequ
         type={modalConfig.type}
         isAlert={modalConfig.isAlert}
         confirmText={modalConfig.confirmText}
+        cancelText={modalConfig.cancelText}
+        extraButtonText={modalConfig.extraButtonText}
+        onExtraButtonClick={modalConfig.onExtraButtonClick}
+        extraButtonDisabled={modalConfig.extraButtonDisabled}
+        confirmDisabled={modalConfig.confirmDisabled}
       />
 
       <div
-        className="modal-content"
+        className="modal-content view-order-modal"
         onClick={(e) => e.stopPropagation()}
         style={{
-          maxWidth: '900px',
-          width: '100%',
+          maxWidth: '1200px',
+          width: '95vw',
           maxHeight: '90vh',
           display: 'flex',
           flexDirection: 'column',
-          padding: 0, // Reset default padding to handle scroll area properly
-          overflow: 'hidden', // Let the body scroll
-          '@media print': {
-            boxShadow: 'none',
-            borderRadius: 0,
-            maxHeight: 'none',
-            overflow: 'visible'
-          }
+          padding: 0,
+          overflow: 'hidden'
         }}
       >
         {/* Modal Header / Action Bar */}
@@ -732,15 +657,13 @@ const ViewOrderModal = ({ order, customerOrderCount = 1, onClose, onSave, onRequ
             </button>
             <button
               onClick={handleSendInvoiceWhatsApp}
-              className="btn"
-              style={{
-                display: 'flex', alignItems: 'center', gap: '0.5rem',
-                backgroundColor: '#25D366', color: 'white', border: 'none'
-              }}
-              title="Share Invoice via WhatsApp"
+              className="btn btn-whatsapp"
+              disabled={isFreeUser}
+              title={isFreeUser ? "WhatsApp is a Pro feature" : "Share Invoice via WhatsApp"}
             >
               <MessageCircle size={18} />
               <span className="hidden-mobile">WhatsApp</span>
+              {isFreeUser && <Crown size={14} color="var(--danger)" />}
             </button>
             <button className="modal-close" onClick={onClose} style={{ marginLeft: '0.5rem' }}>
               <X size={20} />
@@ -748,533 +671,634 @@ const ViewOrderModal = ({ order, customerOrderCount = 1, onClose, onSave, onRequ
           </div>
         </div>
 
-        {/* Scrollable Content Body */}
-        <div className="modal-body-scroll">
-          {/* Invoice Header (Only visible in Print or heavily emphasized in view) */}
-          <div className="print-only" style={{
-            textAlign: 'center',
-            borderBottom: '2px solid var(--accent-primary)',
-            paddingBottom: '1.5rem',
-            marginBottom: '2rem',
-            display: 'none' // Hidden on screen, shown in print via CSS media query usually, but inline styles are tricky.
-            // Better to keep a simple visual header for screen.
-          }}>
-            <h1 style={{ color: 'var(--accent-primary)', fontSize: '2rem', marginBottom: '0.5rem' }}>Art Of Frames</h1>
-            <p style={{ color: 'var(--text-muted)' }}>Art that remembers</p>
-          </div>
-
-          {/* Invoice Info & Customer Details */}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
-            gap: '1.5rem',
-            marginBottom: '2rem'
-          }}>
-            {/* Order Details Card */}
-            <div className="card" style={{ padding: '1.5rem', height: '100%' }}>
-              <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
-                Order Details
-              </h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>Status:</span>
-                  <select
-                    value={safeOrder.status}
-                    onChange={(e) => handleStatusChange('status', e.target.value)}
-                    className="form-input"
-                    style={{
-                      padding: '0.4rem 0.75rem',
-                      fontSize: '0.875rem',
-                      width: 'auto',
-                      backgroundColor: 'var(--bg-card)',
-                      color: 'var(--text-primary)',
-                      border: '1px solid var(--border-color)',
-                      borderRadius: 'var(--radius)',
-                      cursor: 'pointer',
-                      outline: 'none'
-                    }}
-                  >
-                    <option value="New Order" style={{ backgroundColor: '#1a1a1a', color: '#fff' }}>New Order</option>
-                    <option value="Pending" style={{ backgroundColor: '#1a1a1a', color: '#fff' }}>Pending</option>
-                    <option value="Packed" style={{ backgroundColor: '#1a1a1a', color: '#fff' }}>Packed</option>
-                    <option value="Dispatched" style={{ backgroundColor: '#1a1a1a', color: '#fff' }}>Dispatched</option>
-                    <option value="Delivered" style={{ backgroundColor: '#1a1a1a', color: '#fff' }}>Delivered</option>
-                    <option value="Cancelled" style={{ backgroundColor: '#1a1a1a', color: '#fff' }}>Cancelled</option>
-                  </select>
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>Payment:</span>
-                  <select
-                    value={safeOrder.paymentStatus}
-                    onChange={(e) => handleStatusChange('paymentStatus', e.target.value)}
-                    className="form-input"
-                    style={{
-                      padding: '0.4rem 0.75rem',
-                      fontSize: '0.875rem',
-                      width: 'auto',
-                      backgroundColor: 'var(--bg-card)',
-                      color: 'var(--text-primary)',
-                      border: '1px solid var(--border-color)',
-                      borderRadius: 'var(--radius)',
-                      cursor: 'pointer',
-                      outline: 'none'
-                    }}
-                  >
-                    <option value="Pending" style={{ backgroundColor: '#1a1a1a', color: '#fff' }}>Pending</option>
-                    <option value="Paid" style={{ backgroundColor: '#1a1a1a', color: '#fff' }}>Paid</option>
-                  </select>
-                </div>
-
-                {safeOrder.scheduledDeliveryDate && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>Scheduled Delivery:</span>
-                    <span style={{ color: 'var(--accent-primary)', fontWeight: 600 }}>{safeOrder.scheduledDeliveryDate}</span>
-                  </div>
-                )}
-
-                {safeOrder.dispatchDate && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>Dispatched Date:</span>
-                    <span style={{ color: 'var(--text-primary)' }}>{safeOrder.dispatchDate.includes('T') ? safeOrder.dispatchDate.split('T')[0] : safeOrder.dispatchDate}</span>
-                  </div>
-                )}
-
-                <div style={{ marginTop: '0.5rem', padding: '0.75rem', backgroundColor: 'var(--bg-secondary)', borderRadius: 'var(--radius)' }}>
-                  <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem' }}>Tracking Number</label>
-                  <input
-                    type="text"
-                    value={safeOrder.trackingNumber}
-                    onChange={(e) => setLocalOrder(prev => ({ ...prev, trackingNumber: e.target.value }))}
-                    placeholder="No Tracking ID"
-                    style={{
-                      width: '100%',
-                      padding: '0.2rem 0',
-                      fontSize: '1rem',
-                      fontWeight: 600,
-                      color: 'var(--accent-primary)',
-                      letterSpacing: '0.5px',
-                      backgroundColor: 'transparent',
-                      border: 'none',
-                      borderBottom: '1px solid var(--border-color)',
-                      borderRadius: 0,
-                      outline: 'none'
-                    }}
-                    onFocus={(e) => e.target.style.borderColor = 'var(--accent-primary)'}
-                    onBlur={(e) => {
-                      e.target.style.borderColor = 'var(--border-color)'
-                      if (onSave) onSave(localOrder)
-                    }}
-                  />
-                </div>
-
-                {safeOrder.courierFinanceStatus && (
-                  <div style={{ marginTop: '0.5rem', padding: '0.75rem', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: 'var(--radius)', border: '1px solid var(--border-color)' }}>
-                    <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.25rem' }}>Courier Finance Info</label>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
-                        <span>Status:</span>
-                        <span style={{
-                          fontWeight: 600,
-                          color: safeOrder.courierFinanceStatus === 'Deposited' || safeOrder.courierFinanceStatus === 'Approved' ? '#10b981' : 'var(--accent-secondary)'
-                        }}>
-                          {getSafeName(safeOrder.courierFinanceStatus)}
-                        </span>
-                      </div>
-                      {safeOrder.courierInvoiceNo && (
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
-                          <span>Invoice:</span>
-                          <span style={{ fontWeight: 500 }}>{safeOrder.courierInvoiceNo}</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
+        {/* Scrollable Content Body - Split Layout */}
+        <div className="modal-body-scroll view-order-split-layout">
+          {/* LEFT COLUMN - Order Details */}
+          <div className="view-order-left-column">
+            {/* Invoice Header (Only visible in Print) */}
+            <div className="print-only" style={{
+              textAlign: 'center',
+              borderBottom: '2px solid var(--accent-primary)',
+              paddingBottom: '1.5rem',
+              marginBottom: '2rem',
+              display: 'none'
+            }}>
+              <h1 style={{ color: 'var(--accent-primary)', fontSize: '2rem', marginBottom: '0.5rem' }}>AOF Biz</h1>
+              <p style={{ color: 'var(--text-muted)' }}>From Chaos To Clarity.</p>
             </div>
 
-            {/* Customer Details Card */}
-            <div className="card" style={{ padding: '1.5rem', height: '100%' }}>
-              <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
-                Customer Information
-              </h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                <div style={{ fontWeight: 600, fontSize: '1.1rem', color: 'var(--text-primary)' }}>
-                  {safeOrder.customerName}
-                  {customerOrderCount > 1 && (
-                    <span
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '0.2rem',
-                        padding: '0.1rem 0.4rem',
-                        backgroundColor: 'var(--accent-primary)',
-                        color: '#fff',
-                        borderRadius: '12px',
-                        fontSize: '0.7rem',
-                        fontWeight: 700,
-                        marginLeft: '0.5rem',
-                        verticalAlign: 'middle'
-                      }}
-                      title={`${customerOrderCount} orders placed`}
-                    >
-                      <Star size={12} fill="currentColor" /> {customerOrderCount}
-                    </span>
-                  )}
-                </div>
 
-                {safeOrder.address && (
-                  <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', lineHeight: '1.5', whiteSpace: 'pre-wrap' }}>
-                    {safeOrder.address}
+            {/* Unified Order & Customer Card */}
+            <div className="glass-card" style={{
+              backgroundColor: 'var(--bg-card)',
+              border: '1px solid var(--border-color)',
+              borderRadius: '12px',
+              padding: '1.5rem',
+              marginBottom: '1.5rem',
+              boxShadow: '0 4px 24px rgba(0, 0, 0, 0.08)'
+            }}>
+              {/* Header Row: Customer Name + Order Status Badges */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem', flexWrap: 'wrap', gap: '1rem' }}>
+                <div style={{ flex: '1', minWidth: '200px' }}>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    {safeOrder.customerName}
+                    {customerOrderCount > 1 && (
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.2rem',
+                          padding: '0.15rem 0.5rem',
+                          backgroundColor: 'var(--accent-primary)',
+                          color: '#fff',
+                          borderRadius: '12px',
+                          fontSize: '0.7rem',
+                          fontWeight: 700
+                        }}
+                        title={`${customerOrderCount} orders placed`}
+                      >
+                        <Star size={10} fill="currentColor" /> {customerOrderCount}
+                      </span>
+                    )}
                   </div>
-                )}
-
-                <div style={{ marginTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.9rem' }}>
-                  {(safeOrder.nearestCity || safeOrder.district) && (
-                    <span style={{ color: 'var(--text-muted)' }}>
-                      {safeOrder.nearestCity}{safeOrder.nearestCity && safeOrder.district ? ', ' : ''}{safeOrder.district}
-                    </span>
-                  )}
-
                   {safeOrder.whatsapp && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--success)' }}>
+                    <a href={`https://wa.me/${safeOrder.whatsapp.replace(/\D/g, '')}`} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', color: '#25D366', fontSize: '0.85rem', marginTop: '0.25rem', textDecoration: 'none' }}>
                       <MessageCircle size={14} />
-                      <span>{formatWhatsAppNumber(safeOrder.whatsapp)}</span>
-                    </div>
+                      {formatWhatsAppNumber(safeOrder.whatsapp)}
+                    </a>
                   )}
                   {safeOrder.phone && safeOrder.phone !== safeOrder.whatsapp && (
-                    <div style={{ color: 'var(--text-muted)' }}>Phone: {safeOrder.phone}</div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: '0.15rem' }}>
+                      📞 {safeOrder.phone}
+                    </div>
+                  )}
+                </div>
+
+                {/* Status Badges */}
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <CustomDropdown
+                    options={[
+                      { value: 'New Order', label: 'New Order' },
+                      { value: 'Pending', label: 'Pending' },
+                      { value: 'Packed', label: 'Packed' },
+                      { value: 'Dispatched', label: 'Dispatched' },
+                      { value: 'Delivered', label: 'Delivered' },
+                      { value: 'Cancelled', label: 'Cancelled' }
+                    ]}
+                    value={safeOrder.status}
+                    onChange={(val) => handleStatusChange('status', val)}
+                    style={{ minWidth: '120px' }}
+                  />
+                  {!isFreeUser && (
+                    <CustomDropdown
+                      options={[
+                        { value: 'Pending', label: 'Pending' },
+                        { value: 'Paid', label: 'Paid' }
+                      ]}
+                      value={safeOrder.paymentStatus}
+                      onChange={(val) => handleStatusChange('paymentStatus', val)}
+                      style={{ minWidth: '100px' }}
+                    />
+                  )}
+                </div>
+              </div>
+
+              {/* Divider */}
+              <div style={{ height: '1px', background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent)', margin: '1rem 0' }}></div>
+
+              {/* Info Grid: 2 columns on Desktop, 1 on Mobile */}
+              <div className="order-info-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
+                {/* Delivery Info */}
+                <div>
+                  <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '1px', color: 'var(--text-muted)', fontWeight: 600, marginBottom: '0.5rem' }}>
+                    📍 Delivery Address
+                  </div>
+                  <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', lineHeight: '1.6', whiteSpace: 'pre-wrap' }}>
+                    {safeOrder.address || 'No address provided'}
+                  </div>
+                  {(safeOrder.nearestCity || safeOrder.district) && (
+                    <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: '0.25rem' }}>
+                      {safeOrder.nearestCity}{safeOrder.nearestCity && safeOrder.district ? ', ' : ''}{safeOrder.district}
+                    </div>
+                  )}
+                </div>
+
+                {/* Dates & Tracking */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  {safeOrder.scheduledDeliveryDate && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Scheduled:</span>
+                      <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--accent-primary)' }}>{safeOrder.scheduledDeliveryDate}</span>
+                    </div>
+                  )}
+                  {safeOrder.dispatchDate && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Dispatched:</span>
+                      <span style={{ fontSize: '0.85rem', color: 'var(--text-primary)' }}>{safeOrder.dispatchDate.includes('T') ? safeOrder.dispatchDate.split('T')[0] : safeOrder.dispatchDate}</span>
+                    </div>
+                  )}
+                  {!isFreeUser && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.25rem' }}>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Tracking:</span>
+                      <input
+                        type="text"
+                        value={safeOrder.trackingNumber || ''}
+                        onChange={(e) => setLocalOrder(prev => ({ ...prev, trackingNumber: e.target.value }))}
+                        placeholder="—"
+                        style={{
+                          textAlign: 'right',
+                          width: '140px',
+                          padding: '0.25rem 0.5rem',
+                          fontSize: '0.85rem',
+                          fontWeight: 600,
+                          color: 'var(--accent-primary)',
+                          fontFamily: 'monospace',
+                          backgroundColor: 'var(--bg-secondary)',
+                          border: '1px solid var(--border-color)',
+                          borderRadius: '6px',
+                          outline: 'none'
+                        }}
+                        onFocus={(e) => e.target.style.borderColor = 'var(--accent-primary)'}
+                        onBlur={(e) => {
+                          e.target.style.borderColor = 'var(--border-color)'
+                          if (onSave) onSave(localOrder)
+                        }}
+                      />
+                    </div>
                   )}
                 </div>
               </div>
             </div>
-          </div>
 
-          {/* Items Table */}
-          {/* Items Table */}
-          {/* Items Table - Desktop */}
-          <div className="items-table-desktop" style={{ overflowX: 'auto', marginBottom: '2rem' }}>
-            <table style={{
-              width: '100%',
-              borderCollapse: 'collapse',
-              fontSize: '0.9rem'
-            }}>
-              <thead>
-                <tr style={{
-                  backgroundColor: 'var(--bg-secondary)',
-                  borderBottom: '2px solid var(--border-color)',
-                  color: 'var(--text-muted)'
-                }}>
-                  <th style={{ padding: '1rem', textAlign: 'left', fontWeight: 600 }}>DESCRIPTION</th>
-                  <th style={{ padding: '1rem', textAlign: 'center', fontWeight: 600 }}>QTY</th>
-                  <th style={{ padding: '1rem', textAlign: 'right', fontWeight: 600 }}>UNIT PRICE</th>
-                  <th style={{ padding: '1rem', textAlign: 'right', fontWeight: 600 }}>AMOUNT</th>
-                </tr>
-              </thead>
-              <tbody>
-                {orderItems.map((it, idx) => {
-                  const catName = getCategoryName(it.categoryId)
-                  const itName = getItemName(it)
-                  const qty = Number(it.quantity) || 0
-                  const price = Number(it.unitPrice) || 0
-                  const amount = qty * price
-                  const notes = (it.notes || '').toString().trim()
-                  return (
-                    <tr key={`${idx}-${it.itemId || it.customItemName || 'item'}`} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                      <td style={{ padding: '1rem', color: 'var(--text-primary)' }}>
-                        <div style={{ fontWeight: 500 }}>{catName} - {itName}</div>
-                        {it.image && (
-                          <div style={{ marginTop: '0.5rem' }}>
-                            <a href={it.image} target="_blank" rel="noopener noreferrer">
-                              <img src={it.image} alt="Ref" style={{ height: '50px', borderRadius: '4px', border: '1px solid var(--border-color)' }} />
-                            </a>
-                          </div>
-                        )}
-                        {notes && (
-                          <div style={{ marginTop: '0.25rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                            {notes}
-                          </div>
-                        )}
-                      </td>
-                      <td style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-secondary)' }}>{qty}</td>
-                      <td style={{ padding: '1rem', textAlign: 'right', color: 'var(--text-secondary)' }}>Rs. {price.toFixed(2)}</td>
-                      <td style={{ padding: '1rem', textAlign: 'right', fontWeight: 600, color: 'var(--text-primary)' }}>Rs. {amount.toFixed(2)}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Items List - Mobile */}
-          <div className="items-card-mobile">
-            {orderItems.map((it, idx) => {
-              const catName = getCategoryName(it.categoryId)
-              const itName = getItemName(it)
-              const qty = Number(it.quantity) || 0
-              const price = Number(it.unitPrice) || 0
-              const amount = qty * price
-              const notes = (it.notes || '').toString().trim()
-              return (
-                <div key={`${idx}-mobile`} className="item-mobile-row">
-                  <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
-                    {catName} - {itName}
-                  </div>
-
-                  {it.image && (
-                    <div style={{ marginBottom: '0.75rem' }}>
-                      <img src={it.image} alt="Ref" style={{ width: '100%', maxWidth: '200px', borderRadius: '8px', border: '1px solid var(--border-color)' }} />
-                    </div>
-                  )}
-
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>
-                    <span>Quantity:</span>
-                    <span>{qty}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>
-                    <span>Unit Price:</span>
-                    <span>Rs. {price.toFixed(2)}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.95rem', fontWeight: 600, color: 'var(--accent-primary)', marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-                    <span>Total:</span>
-                    <span>Rs. {amount.toFixed(2)}</span>
-                  </div>
-
-                  {notes && (
-                    <div style={{ marginTop: '0.75rem', padding: '0.5rem', backgroundColor: 'rgba(0,0,0,0.1)', borderRadius: '4px', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                      <strong>Notes:</strong> {notes}
-                    </div>
-                  )}
-
-
-                </div>
-              )
-            })}
-          </div>
-
-
-
-          {/* Totals Section */}
-          <div style={{
-            display: 'flex',
-            justifyContent: 'flex-end',
-            marginBottom: '2rem'
-          }}>
-            <div className="totals-container">
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', color: 'var(--text-secondary)' }}>
-                <span>Subtotal:</span>
-                <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>Rs. {totalPrice.toFixed(2)}</span>
-              </div>
-              {discountAmount > 0 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', color: 'var(--success)' }}>
-                  <span>Discount ({discountType === '%' ? discount + '%' : 'Rs. ' + discount.toFixed(2)}):</span>
-                  <span>- Rs. {discountAmount.toFixed(2)}</span>
-                </div>
-              )}
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem', color: 'var(--text-secondary)' }}>
-                <span>Delivery Charge:</span>
-                <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>Rs. {deliveryCharge.toFixed(2)}</span>
-              </div>
-              {advancePayment > 0 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem', color: 'var(--success)' }}>
-                  <span>Advance Payment:</span>
-                  <span style={{ fontWeight: 500 }}>- Rs. {advancePayment.toFixed(2)}</span>
-                </div>
-              )}
-              <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                paddingTop: '0.75rem',
-                borderTop: '1px solid var(--border-color)',
-                fontSize: '1.2rem',
-                fontWeight: 700,
-                color: 'var(--accent-primary)'
+            {/* Items Table */}
+            {/* Items Table */}
+            {/* Items Table - Desktop */}
+            <div className="items-table-desktop" style={{ overflowX: 'auto', marginBottom: '2rem' }}>
+              <table style={{
+                width: '100%',
+                borderCollapse: 'collapse',
+                fontSize: '0.9rem'
               }}>
-                <span>Total (COD):</span>
-                <span>Rs. {codAmount.toFixed(2)}</span>
-              </div>
+                <thead>
+                  <tr style={{
+                    backgroundColor: 'var(--bg-secondary)',
+                    borderBottom: '2px solid var(--border-color)',
+                    color: 'var(--text-muted)'
+                  }}>
+                    <th style={{ padding: '1rem', textAlign: 'left', fontWeight: 600 }}>DESCRIPTION</th>
+                    <th style={{ padding: '1rem', textAlign: 'center', fontWeight: 600 }}>QTY</th>
+                    <th style={{ padding: '1rem', textAlign: 'right', fontWeight: 600 }}>UNIT PRICE</th>
+                    <th style={{ padding: '1rem', textAlign: 'right', fontWeight: 600 }}>AMOUNT</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {orderItems.map((it, idx) => {
+                    const catName = getCategoryName(it.categoryId)
+                    const itName = getItemName(it)
+                    const qty = Number(it.quantity) || 0
+                    const price = Number(it.unitPrice) || 0
+                    const amount = qty * price
+                    const notes = (it.notes || '').toString().trim()
+                    return (
+                      <tr key={`${idx}-${it.itemId || it.customItemName || 'item'}`} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                        <td style={{ padding: '1rem', color: 'var(--text-primary)' }}>
+                          <div style={{ fontWeight: 500 }}>{catName} - {itName}</div>
+                          {it.image && (
+                            <div style={{ marginTop: '0.5rem' }}>
+                              <a href={it.image} target="_blank" rel="noopener noreferrer">
+                                <img src={it.image} alt="Ref" style={{ height: '50px', borderRadius: '4px', border: '1px solid var(--border-color)' }} />
+                              </a>
+                            </div>
+                          )}
+                          {notes && (
+                            <div style={{ marginTop: '0.25rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                              {notes}
+                            </div>
+                          )}
+                        </td>
+                        <td style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-secondary)' }}>{qty}</td>
+                        <td style={{ padding: '1rem', textAlign: 'right', color: 'var(--text-secondary)' }}>Rs. {price.toFixed(2)}</td>
+                        <td style={{ padding: '1rem', textAlign: 'right', fontWeight: 600, color: 'var(--text-primary)' }}>Rs. {amount.toFixed(2)}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
             </div>
-          </div>
 
-          {/* Notes */}
-          {safeOrder.notes && (
-            <div style={{
-              marginBottom: '2rem',
-              padding: '1rem',
-              backgroundColor: 'var(--bg-secondary)',
-              borderRadius: 'var(--radius)',
-              borderLeft: '4px solid var(--accent-primary)'
-            }}>
-              <h4 style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.5rem', textTransform: 'uppercase' }}>
-                Order Notes
-              </h4>
-              <p style={{ color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', lineHeight: '1.6', fontSize: '0.9rem' }}>
-                {safeOrder.notes}
-              </p>
-            </div>
-          )}
+            {/* Items List - Mobile */}
+            <div className="items-card-mobile">
+              {orderItems.map((it, idx) => {
+                const catName = getCategoryName(it.categoryId)
+                const itName = getItemName(it)
+                const qty = Number(it.quantity) || 0
+                const price = Number(it.unitPrice) || 0
+                const amount = qty * price
+                const notes = (it.notes || '').toString().trim()
+                return (
+                  <div key={`${idx}-mobile`} className="item-mobile-row">
+                    <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
+                      {catName} - {itName}
+                    </div>
 
-          {/* Tracking History */}
-          <div className="items-card-mobile">
-            {(loadingTracking || trackingHistory.length > 0) && (
-              <div style={{ marginBottom: '1.5rem', padding: '1rem', border: '1px solid var(--border-color)', borderRadius: '8px', backgroundColor: 'var(--bg-primary)' }}>
-                <h4 style={{ fontSize: '0.9rem', fontWeight: 600, marginBottom: '0.75rem', color: 'var(--text-primary)' }}>Tracking History</h4>
-                {loadingTracking ? (
-                  <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Loading updates...</div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                    {trackingHistory.map((event, idx) => (
-                      <div key={idx} style={{ position: 'relative', paddingLeft: '1rem', borderLeft: '2px solid var(--border-color)' }}>
-                        <div style={{ position: 'absolute', left: '-5px', top: '2px', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: idx === 0 ? 'var(--accent-primary)' : 'var(--text-muted)' }}></div>
-                        <div style={{ fontSize: '0.85rem', fontWeight: 600, color: idx === 0 ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
-                          {getSafeName(event.status) || getSafeName(event.status_code) || 'Update'}
-                        </div>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                          {new Date(event.updated_at || event.create_at || event.date).toLocaleString()}
-                        </div>
-                        {event.comment && <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{event.comment}</div>}
+                    {it.image && (
+                      <div style={{ marginBottom: '0.75rem' }}>
+                        <img src={it.image} alt="Ref" style={{ width: '100%', maxWidth: '200px', borderRadius: '8px', border: '1px solid var(--border-color)' }} />
                       </div>
-                    ))}
+                    )}
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>
+                      <span>Quantity:</span>
+                      <span>{qty}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>
+                      <span>Unit Price:</span>
+                      <span>Rs. {price.toFixed(2)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.95rem', fontWeight: 600, color: 'var(--accent-primary)', marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                      <span>Total:</span>
+                      <span>Rs. {amount.toFixed(2)}</span>
+                    </div>
+
+                    {notes && (
+                      <div style={{ marginTop: '0.75rem', padding: '0.5rem', backgroundColor: 'rgba(0,0,0,0.1)', borderRadius: '4px', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                        <strong>Notes:</strong> {notes}
+                      </div>
+                    )}
+
+
+                  </div>
+                )
+              })}
+            </div>
+
+
+
+            {/* Totals Section */}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'flex-end',
+              marginBottom: '2rem'
+            }}>
+              <div className="totals-container">
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', color: 'var(--text-secondary)' }}>
+                  <span>Subtotal:</span>
+                  <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>Rs. {totalPrice.toFixed(2)}</span>
+                </div>
+                {discountAmount > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', color: 'var(--success)' }}>
+                    <span>Discount ({discountType === '%' ? discount + '%' : 'Rs. ' + discount.toFixed(2)}):</span>
+                    <span>- Rs. {discountAmount.toFixed(2)}</span>
                   </div>
                 )}
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem', color: 'var(--text-secondary)' }}>
+                  <span>Delivery Charge:</span>
+                  <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>Rs. {deliveryCharge.toFixed(2)}</span>
+                </div>
+                {advancePayment > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem', color: 'var(--success)' }}>
+                    <span>Advance Payment:</span>
+                    <span style={{ fontWeight: 500 }}>- Rs. {advancePayment.toFixed(2)}</span>
+                  </div>
+                )}
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  paddingTop: '0.75rem',
+                  borderTop: '1px solid var(--border-color)',
+                  fontSize: '1.2rem',
+                  fontWeight: 700,
+                  color: 'var(--accent-primary)'
+                }}>
+                  <span>{isFreeUser ? 'Total:' : 'Total (COD):'}</span>
+                  <span>Rs. {codAmount.toFixed(2)}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Notes */}
+            {safeOrder.notes && (
+              <div style={{
+                marginBottom: '2rem',
+                padding: '1rem',
+                backgroundColor: 'var(--bg-secondary)',
+                borderRadius: 'var(--radius)',
+                borderLeft: '4px solid var(--accent-primary)'
+              }}>
+                <h4 style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.5rem', textTransform: 'uppercase' }}>
+                  Order Notes
+                </h4>
+                <p style={{ color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', lineHeight: '1.6', fontSize: '0.9rem' }}>
+                  {safeOrder.notes}
+                </p>
               </div>
             )}
-          </div>
 
-          {/* Tracking History Desktop View */}
-          {(loadingTracking || trackingHistory.length > 0) && (
-            <div style={{ marginTop: '2rem', padding: '1.5rem', border: '1px solid var(--border-color)', borderRadius: '8px', backgroundColor: 'var(--bg-secondary)' }} className="items-table-desktop">
-              <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
-                Tracking History
-              </h3>
-              {loadingTracking ? (
-                <div style={{ color: 'var(--text-muted)' }}>Loading tracking updates...</div>
+          </div>
+          {/* END LEFT COLUMN */}
+
+          {/* RIGHT COLUMN - Tracking & Finance */}
+          <div className="view-order-right-column">
+            {/* Tracking Section */}
+            <div className="tracking-finance-panel glass-card" style={{
+              backgroundColor: 'var(--bg-card)',
+              border: '1px solid var(--border-color)',
+              borderRadius: '12px',
+              padding: '1.5rem',
+              position: 'sticky',
+              top: '0',
+              boxShadow: '0 4px 24px rgba(0, 0, 0, 0.08)'
+            }}>
+              {/* Header */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.5rem' }}>
+                <div style={{
+                  padding: '0.5rem',
+                  borderRadius: '10px',
+                  backgroundColor: 'rgba(var(--accent-rgb), 0.1)',
+                  color: 'var(--accent-primary)'
+                }}>
+                  <Truck size={24} />
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '1rem', fontWeight: 600, margin: 0 }}>Shipment Status</h3>
+                  {safeOrder.trackingNumber && (
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                      Waybill: <span style={{ fontFamily: 'monospace', color: 'var(--text-primary)' }}>{safeOrder.trackingNumber}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {!safeOrder.trackingNumber ? (
+                <div style={{ textAlign: 'center', padding: '2rem 1rem', color: 'var(--text-muted)' }}>
+                  <Truck size={40} style={{ opacity: 0.3, marginBottom: '1rem' }} />
+                  <p style={{ margin: 0 }}>No tracking number assigned yet.</p>
+                  <p style={{ fontSize: '0.8rem', marginTop: '0.5rem' }}>Mark order as "Packed" to generate a waybill.</p>
+                </div>
+              ) : loadingTracking ? (
+                <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                  <RefreshCw className="animate-spin" size={24} style={{ color: 'var(--accent-primary)', marginBottom: '0.5rem' }} />
+                  <p>Fetching updates...</p>
+                </div>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                  {trackingHistory.map((event, idx) => (
-                    <div key={idx} style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
-                      <div style={{ minWidth: '140px', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                        {new Date(event.updated_at || event.create_at || event.date).toLocaleString()}
+                <>
+                  {/* Current Status Hero */}
+                  <div style={{
+                    padding: '1rem',
+                    borderRadius: '10px',
+                    background: 'linear-gradient(135deg, rgba(var(--accent-rgb), 0.1) 0%, rgba(var(--accent-rgb), 0.05) 100%)',
+                    border: '1px solid rgba(var(--accent-rgb), 0.2)',
+                    marginBottom: '1.5rem',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                  }}>
+                    <div>
+                      <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '1px', color: 'var(--accent-primary)', fontWeight: 700 }}>
+                        Current Status
                       </div>
-                      <div>
-                        <div style={{ fontWeight: 600, color: idx === 0 ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
-                          {getSafeName(event.status) || getSafeName(event.status_code) || 'Update'}
-                        </div>
-                        {event.comment && <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{event.comment}</div>}
+                      <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-primary)', marginTop: '2px' }}>
+                        {(() => {
+                          if (trackingHistory.length === 0) return 'Awaiting Update'
+                          const latest = trackingHistory[0]
+                          return getSafeName(latest.status) || getSafeName(latest.status_code) || 'Update'
+                        })()}
                       </div>
                     </div>
-                  ))}
+                    <div style={{ padding: '0.75rem', background: 'rgba(var(--accent-rgb), 0.2)', borderRadius: '50%', color: 'var(--accent-primary)' }}>
+                      <Truck size={24} />
+                    </div>
+                  </div>
+
+                  {/* Timeline */}
+                  {trackingHistory.length > 0 && (
+                    <div style={{ marginBottom: '1.5rem' }}>
+                      <h4 style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.75rem', color: 'var(--text-secondary)' }}>Shipment History</h4>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0', maxHeight: '200px', overflowY: 'auto', paddingRight: '0.5rem' }}>
+                        {trackingHistory.slice(0, 5).map((event, idx) => (
+                          <div key={idx} style={{ display: 'flex', gap: '0.75rem', position: 'relative', paddingBottom: idx === Math.min(4, trackingHistory.length - 1) ? 0 : '1rem' }}>
+                            {idx !== Math.min(4, trackingHistory.length - 1) && (
+                              <div style={{ position: 'absolute', left: '5px', top: '18px', bottom: '0', width: '2px', backgroundColor: 'var(--border-color)' }}></div>
+                            )}
+                            <div style={{
+                              width: '12px', height: '12px', borderRadius: '50%',
+                              backgroundColor: idx === 0 ? 'var(--accent-primary)' : 'var(--bg-card)',
+                              border: idx === 0 ? '3px solid rgba(var(--accent-rgb), 0.3)' : '2px solid var(--text-muted)',
+                              flexShrink: 0, marginTop: '3px', zIndex: 1
+                            }}></div>
+                            <div>
+                              <div style={{ fontWeight: idx === 0 ? 600 : 400, color: idx === 0 ? 'var(--text-primary)' : 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                                {getSafeName(event.status) || getSafeName(event.status_code) || 'Update'}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                        {trackingHistory.length > 5 && (
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', paddingLeft: '1.5rem' }}>
+                            +{trackingHistory.length - 5} more updates
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* Finance Section */}
+              {safeOrder.trackingNumber && settings?.curfox?.enabled && (
+                <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '1.5rem', marginTop: '0.5rem' }}>
+                  <h4 style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: '1rem', color: 'var(--text-secondary)' }}>Finance Status</h4>
+
+                  {financeLoading ? (
+                    <div style={{ textAlign: 'center', padding: '1rem', color: 'var(--text-muted)' }}>
+                      <RefreshCw className="animate-spin" size={20} />
+                    </div>
+                  ) : financeData ? (
+                    <>
+                      <div style={{
+                        padding: '1rem',
+                        borderRadius: '10px',
+                        background: financeData.finance_status === 'Deposited'
+                          ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(16, 185, 129, 0.05) 100%)'
+                          : 'linear-gradient(135deg, rgba(234, 179, 8, 0.1) 0%, rgba(234, 179, 8, 0.05) 100%)',
+                        border: `1px solid ${financeData.finance_status === 'Deposited' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(234, 179, 8, 0.2)'}`,
+                        textAlign: 'center',
+                        marginBottom: '1rem'
+                      }}>
+                        <div style={{
+                          fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-primary)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px'
+                        }}>
+                          {financeData.finance_status || 'Pending'}
+                          {financeData.finance_status === 'Deposited' && <CheckCircle size={20} fill="#10b981" color="black" />}
+                        </div>
+                      </div>
+
+                      {/* Invoice details */}
+                      <div style={{ fontSize: '0.8rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1rem' }}>
+                        {financeData.invoice_ref_no && (
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span style={{ color: 'var(--text-muted)' }}>Invoice Ref:</span>
+                            <span style={{ fontWeight: 500 }}>{financeData.invoice_ref_no}</span>
+                          </div>
+                        )}
+                        {financeData.invoice_no && (
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span style={{ color: 'var(--text-muted)' }}>Invoice No:</span>
+                            <span style={{ fontWeight: 500, fontFamily: 'monospace' }}>{financeData.invoice_no}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <button
+                        onClick={handleSyncFinance}
+                        disabled={financeLoading}
+                        className="btn btn-primary"
+                        style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.5rem', fontSize: '0.9rem' }}
+                      >
+                        {financeLoading ? <RefreshCw className="animate-spin" size={16} /> : <RefreshCw size={16} />}
+                        Sync to Order
+                      </button>
+                    </>
+                  ) : (
+                    <div style={{ textAlign: 'center', padding: '1rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                      <p>No finance record yet.</p>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
-          )}
-
-          {/* Simple Footer (Screen Only) */}
-          <div className="no-print" style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-            <p>Viewing Order Details</p>
           </div>
+          {/* END RIGHT COLUMN */}
+
           <style>{`
-        .modal-body-scroll {
-          overflow-y: auto;
-          padding: 2rem;
-          flex: 1;
-        }
+            .view-order-split-layout {
+              display: grid;
+              grid-template-columns: 1.6fr 1fr;
+              gap: 2rem;
+              overflow-y: auto;
+              padding: 2rem;
+              flex: 1;
+            }
+            .view-order-left-column {
+              min-width: 0;
+            }
+            .view-order-right-column {
+              min-width: 0;
+            }
+            .tracking-finance-panel {
+              position: sticky;
+              top: 0;
+            }
 
-        .items-card-mobile {
-          display: none;
-          flex-direction: column;
-          gap: 1rem;
-          margin-bottom: 2rem;
-        }
+            .items-card-mobile {
+              display: none;
+              flex-direction: column;
+              gap: 1rem;
+              margin-bottom: 2rem;
+            }
 
-        .item-mobile-row {
-          background: var(--bg-secondary);
-          padding: 1rem;
-          border-radius: 8px;
-          border: 1px solid var(--border-color);
-        }
+            .item-mobile-row {
+              background: var(--bg-secondary);
+              padding: 1rem;
+              border-radius: 8px;
+              border: 1px solid var(--border-color);
+            }
 
-        .totals-container {
-          width: 300px;
-          padding: 1rem;
-          background-color: var(--bg-secondary);
-          borderRadius: var(--radius);
-        }
+            .totals-container {
+              width: 300px;
+              padding: 1rem;
+              background-color: var(--bg-secondary);
+              border-radius: var(--radius);
+            }
 
-        @media (max-width: 600px) {
-          .modal-body-scroll {
-            padding: 1rem !important;
-          }
-          .items-table-desktop {
-            display: none !important;
-          }
-          .items-card-mobile {
-            display: flex !important;
-          }
-          .totals-container {
-            width: 100% !important;
-          }
-          .modal-header {
-            padding: 1rem !important;
-          }
-          .modal-header h2 {
-            font-size: 1.1rem !important;
-          }
-        }
+            @media (max-width: 1024px) {
+              .view-order-split-layout {
+                grid-template-columns: 1fr;
+                padding: 1rem;
+              }
+              .view-order-right-column {
+                order: 2;
+              }
+              .tracking-finance-panel {
+                position: static;
+              }
+            }
 
-        @media print {
-          .modal-overlay {
-            position: absolute; /* Reset fixed */
-            background: white !important;
-            padding: 0 !important;
-            display: block !important;
-          }
-          .modal-content {
-            box-shadow: none !important;
-            border-radius: 0 !important;
-            max-height: none !important;
-            max-width: 100% !important;
-            height: auto !important;
-            background: white !important;
-            padding: 0 !important;
-            overflow: visible !important;
-            display: block !important;
-          }
-          .no-print {
-            display: none !important;
-          }
-          .print-only {
-            display: block !important;
-          }
-          /* Override dark theme for print */
-          .modal-content * {
-            color: #000 !important;
-            background-color: transparent !important;
-            border-color: #ddd !important;
-          }
-          /* Specific overrides for clarity */
-          .modal-content table th {
-            background-color: #f3f4f6 !important;
-            font-weight: bold !important;
-          }
-          /* Hide card backgrounds */
-          .card {
-            border: 1px solid #ddd !important;
-            padding: 10px !important;
-            background: none !important;
-          }
-          .modal-body-scroll {
-            padding: 0 !important;
-            overflow: visible !important;
-          }
-          .items-table-desktop {
-            display: table !important;
-          }
-          .items-card-mobile {
-            display: none !important;
-          }
-        }
-      `}</style>
+            @media (max-width: 600px) {
+              .view-order-split-layout {
+                padding: 1rem;
+                gap: 1rem;
+              }
+              .items-table-desktop {
+                display: none !important;
+              }
+              .items-card-mobile {
+                display: flex !important;
+              }
+              .totals-container {
+                width: 100% !important;
+              }
+              .modal-header {
+                padding: 1rem !important;
+              }
+              .modal-header h2 {
+                font-size: 1.1rem !important;
+              }
+            }
+
+            @media print {
+              .modal-overlay {
+                position: absolute;
+                background: white !important;
+                padding: 0 !important;
+                display: block !important;
+              }
+              .view-order-modal {
+                box-shadow: none !important;
+                border-radius: 0 !important;
+                max-height: none !important;
+                max-width: 100% !important;
+                height: auto !important;
+                background: white !important;
+                padding: 0 !important;
+                overflow: visible !important;
+                display: block !important;
+              }
+              .view-order-split-layout {
+                display: block !important;
+              }
+              .view-order-right-column {
+                display: none !important;
+              }
+              .no-print {
+                display: none !important;
+              }
+              .print-only {
+                display: block !important;
+              }
+              .view-order-modal * {
+                color: #000 !important;
+                background-color: transparent !important;
+                border-color: #ddd !important;
+              }
+              .view-order-modal table th {
+                background-color: #f3f4f6 !important;
+                font-weight: bold !important;
+              }
+              .card {
+                border: 1px solid #ddd !important;
+                padding: 10px !important;
+                background: none !important;
+              }
+              .items-table-desktop {
+                display: table !important;
+              }
+              .items-card-mobile {
+                display: none !important;
+              }
+            }
+          `}</style>
 
           {/* Local fallbacks if parent doesn't provide handlers */}
           {showTrackingModal && (

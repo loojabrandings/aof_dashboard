@@ -1,19 +1,29 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Package, TrendingUp, AlertTriangle, Calendar, CreditCard, X, ShoppingBag, BarChart2, PieChart as PieChartIcon, Activity } from 'lucide-react'
+import { Package, TrendingUp, AlertTriangle, Calendar, CreditCard, X, ShoppingBag, BarChart2, PieChart as PieChartIcon, Activity, Lock, Crown } from 'lucide-react'
 import {
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Legend, BarChart, Bar, LabelList
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  Cell, BarChart, Bar, LabelList
 } from 'recharts'
-import { startOfMonth, endOfMonth, format } from 'date-fns'
+import BaseAreaChart from './Common/Charts/BaseAreaChart'
+import BaseDonutChart from './Common/Charts/BaseDonutChart'
+import { startOfMonth, endOfMonth, format, subMonths, subDays, differenceInDays } from 'date-fns'
 import SummaryCard from './SummaryCard'
 import {
   calculateNetProfit,
   getPendingDispatch
 } from '../utils/calculations'
 import { getTopSellingProducts, formatCurrency } from '../utils/reportUtils'
-import { COLORS, CustomTooltip, chartTheme, tooltipStyle, DonutCenterText, renderDonutLabel } from './Reports/ChartConfig'
+import { COLORS, tooltipStyle, renderDonutLabel, chartTheme, CustomTooltip } from './Reports/ChartConfig'
+import { useLicensing } from './LicensingContext'
+import ProFeatureLock, { ProFeatureBadge } from './ProFeatureLock'
+import CollapsibleDateFilter from './Common/CollapsibleDateFilter'
+
+
+import { useTheme } from './ThemeContext'
 
 const Dashboard = ({ orders, expenses, inventory = [], products, onNavigate }) => {
+  const { isFreeUser } = useLicensing()
+  const { effectiveTheme } = useTheme()
   // --- Filter State ---
   const [filterType, setFilterType] = useState('month') // 'month' or 'range'
   const [selectedMonth, setSelectedMonth] = useState(format(new Date(), 'yyyy-MM'))
@@ -83,6 +93,84 @@ const Dashboard = ({ orders, expenses, inventory = [], products, onNavigate }) =
 
   // Calculate Net Expenses
   const netExpenses = filteredExpenses.reduce((sum, expense) => sum + (expense.amount || 0), 0)
+
+  // --- Value Trend Indicators ---
+  const { prevStartDate, prevEndDate, prevLabel } = useMemo(() => {
+    if (filterType === 'month') {
+      const currentMonthStart = new Date(selectedMonth + '-01')
+      const prevMonthStart = subMonths(currentMonthStart, 1)
+      return {
+        prevStartDate: format(startOfMonth(prevMonthStart), 'yyyy-MM-dd'),
+        prevEndDate: format(endOfMonth(prevMonthStart), 'yyyy-MM-dd'),
+        prevLabel: 'vs last month'
+      }
+    } else if (effectiveStartDate && effectiveEndDate) {
+      const start = new Date(effectiveStartDate)
+      const end = new Date(effectiveEndDate)
+      const duration = differenceInDays(end, start) + 1
+      const prevEnd = subDays(start, 1)
+      const prevStart = subDays(prevEnd, duration - 1)
+      return {
+        prevStartDate: format(prevStart, 'yyyy-MM-dd'),
+        prevEndDate: format(prevEnd, 'yyyy-MM-dd'),
+        prevLabel: 'vs previous period'
+      }
+    }
+    return { prevStartDate: null, prevEndDate: null, prevLabel: '' }
+  }, [filterType, selectedMonth, effectiveStartDate, effectiveEndDate])
+
+  const prevFilteredOrders = useMemo(() => {
+    if (!prevStartDate || !prevEndDate) return []
+    const start = new Date(prevStartDate); start.setHours(0, 0, 0, 0)
+    const end = new Date(prevEndDate); end.setHours(23, 59, 59, 999)
+    return orders.filter(item => {
+      const d = new Date(item.createdDate || '')
+      return d >= start && d <= end
+    })
+  }, [orders, prevStartDate, prevEndDate])
+
+  const prevFilteredExpenses = useMemo(() => {
+    if (!prevStartDate || !prevEndDate) return []
+    const start = new Date(prevStartDate); start.setHours(0, 0, 0, 0)
+    const end = new Date(prevEndDate); end.setHours(23, 59, 59, 999)
+    return expenses.filter(item => {
+      const d = new Date(item.date || '')
+      return d >= start && d <= end
+    })
+  }, [expenses, prevStartDate, prevEndDate])
+
+  const prevNetSales = prevFilteredOrders
+    .filter(order => order.paymentStatus === 'Paid')
+    .reduce((sum, order) => sum + (order.totalPrice || order.totalAmount || 0), 0)
+
+  const prevNetExpenses = prevFilteredExpenses.reduce((sum, e) => sum + (e.amount || 0), 0)
+  const prevNetProfit = calculateNetProfit(prevFilteredOrders, prevFilteredExpenses)
+
+  const calculateTrend = (current, previous) => {
+    if (!previous && current > 0) return { value: 100, isPositive: true, label: prevLabel }
+    if (!previous) return { value: 0, isPositive: true, label: prevLabel }
+    const diff = current - previous
+    const percent = (diff / previous) * 100
+    return {
+      value: percent.toFixed(1),
+      isPositive: diff >= 0,
+      label: prevLabel
+    }
+  }
+
+  const salesTrend = calculateTrend(netSales, prevNetSales)
+  const expensesTrend = calculateTrend(netExpenses, prevNetExpenses)
+  // For expenses: Decrease is good (Green/Positive visually), Increase is bad (Red/Negative visually)
+  const expensesTrendVisual = {
+    ...expensesTrend,
+    isPositive: Number(expensesTrend.value) <= 0
+  }
+  const profitTrend = calculateTrend(netProfit, prevNetProfit)
+
+  const ordersTrend = calculateTrend(
+    filteredOrders.filter(o => !['cancelled', 'returned'].includes((o.status || '').toLowerCase())).length,
+    prevFilteredOrders.filter(item => !['cancelled', 'returned'].includes((item.status || '').toLowerCase())).length
+  )
 
   // Calculate total value of pending dispatch orders
   const pendingDispatchValue = pendingDispatch.reduce((sum, order) => {
@@ -247,16 +335,10 @@ const Dashboard = ({ orders, expenses, inventory = [], products, onNavigate }) =
       <div style={{ marginBottom: window.innerWidth < 600 ? '1.5rem' : '2.5rem' }}>
         <div className="header-container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
           <div>
-            <h1 style={{
-              fontSize: window.innerWidth < 600 ? '1.75rem' : '2.5rem',
-              fontWeight: 800,
-              color: 'var(--text-primary)',
-              marginBottom: '0.25rem',
-              letterSpacing: '-0.02em'
-            }}>
+            <h1 style={{ marginBottom: '0.25rem' }}>
               Overview
             </h1>
-            <p style={{ color: 'var(--text-muted)', fontSize: window.innerWidth < 600 ? '0.85rem' : '1rem' }}>
+            <p style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>
               Real-time business performance metrics
             </p>
           </div>
@@ -268,124 +350,24 @@ const Dashboard = ({ orders, expenses, inventory = [], products, onNavigate }) =
             flexWrap: 'wrap',
             width: window.innerWidth < 600 ? '100%' : 'auto'
           }}>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              backgroundColor: 'rgba(255, 255, 255, 0.03)',
-              padding: '0.4rem',
-              borderRadius: '12px',
-              border: '1px solid var(--border-color)',
-              width: window.innerWidth < 600 ? '100%' : 'auto'
-            }}>
-              <select
-                value={filterType}
-                onChange={(e) => setFilterType(e.target.value)}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  color: 'var(--text-primary)',
-                  fontSize: '0.85rem',
-                  outline: 'none',
-                  padding: '0.25rem 0.5rem',
-                  borderRight: '1px solid var(--border-color)',
-                  marginRight: '0.25rem',
-                  cursor: 'pointer'
-                }}
-              >
-                <option value="month" style={{ background: '#1f2937' }}>By Month</option>
-                <option value="range" style={{ background: '#1f2937' }}>Custom Range</option>
-              </select>
-
-              {filterType === 'month' ? (
-                <input
-                  type="month"
-                  value={selectedMonth}
-                  onChange={(e) => setSelectedMonth(e.target.value)}
-                  style={{
-                    background: 'transparent',
-                    border: 'none',
-                    color: 'var(--text-primary)',
-                    fontSize: '0.85rem',
-                    outline: 'none',
-                    padding: '0.25rem 0.5rem',
-                    colorScheme: 'dark'
-                  }}
-                />
-              ) : (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                  <input
-                    type="date"
-                    value={dateRange.startDate}
-                    onChange={(e) => setDateRange(prev => ({ ...prev, startDate: e.target.value }))}
-                    style={{
-                      background: 'transparent',
-                      border: 'none',
-                      color: 'var(--text-primary)',
-                      fontSize: '0.85rem',
-                      outline: 'none',
-                      padding: '0.25rem',
-                      width: '110px',
-                      colorScheme: 'dark'
-                    }}
-                  />
-                  <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>to</span>
-                  <input
-                    type="date"
-                    value={dateRange.endDate}
-                    onChange={(e) => setDateRange(prev => ({ ...prev, endDate: e.target.value }))}
-                    style={{
-                      background: 'transparent',
-                      border: 'none',
-                      color: 'var(--text-primary)',
-                      fontSize: '0.85rem',
-                      outline: 'none',
-                      padding: '0.25rem',
-                      width: '110px',
-                      colorScheme: 'dark'
-                    }}
-                  />
-                </div>
-              )}
-            </div>
-            {(filterType !== 'month' || selectedMonth !== format(new Date(), 'yyyy-MM')) && (
-              <button
-                onClick={() => {
-                  setFilterType('month')
-                  setSelectedMonth(format(new Date(), 'yyyy-MM'))
-                  setDateRange({
-                    startDate: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
-                    endDate: format(endOfMonth(new Date()), 'yyyy-MM-dd')
-                  })
-                }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  padding: '0.5rem 1rem',
-                  borderRadius: '6px',
-                  border: 'none',
-                  background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(239, 68, 68, 0.05))',
-                  color: '#ef4444',
-                  fontSize: '0.875rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  transition: 'all 0.2s ease',
-                  whiteSpace: 'nowrap'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'linear-gradient(135deg, rgba(239, 68, 68, 0.25), rgba(239, 68, 68, 0.1))'
-                  e.currentTarget.style.transform = 'translateY(-1px)'
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(239, 68, 68, 0.05))'
-                  e.currentTarget.style.transform = 'translateY(0)'
-                }}
-                title="Reset to current month"
-              >
-                <X size={16} /> Clear
-              </button>
-            )}
+            <CollapsibleDateFilter
+              filterType={filterType}
+              onFilterTypeChange={setFilterType}
+              selectedMonth={selectedMonth}
+              onMonthChange={setSelectedMonth}
+              startDate={dateRange.startDate}
+              endDate={dateRange.endDate}
+              onRangeChange={setDateRange}
+              align="right"
+              onReset={() => {
+                setFilterType('month')
+                setSelectedMonth(format(new Date(), 'yyyy-MM'))
+                setDateRange({
+                  startDate: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
+                  endDate: format(endOfMonth(new Date()), 'yyyy-MM-dd')
+                })
+              }}
+            />
           </div>
         </div>
       </div>
@@ -403,6 +385,7 @@ const Dashboard = ({ orders, expenses, inventory = [], products, onNavigate }) =
           icon={ShoppingBag}
           color="var(--accent-primary)"
           subtitle={`Ads: ${adsCount} | Organic: ${organicCount}`}
+          trend={ordersTrend}
           onClick={() => onNavigate && onNavigate('orders')}
           disabled={totalOrdersThisMonth === 0}
         />
@@ -416,11 +399,24 @@ const Dashboard = ({ orders, expenses, inventory = [], products, onNavigate }) =
           disabled={pendingDispatch.length === 0}
         />
         <SummaryCard
-          title="Net Profit"
-          value={`Rs.${netProfit.toLocaleString('en-IN')}`}
+          title={
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              Net Profit
+              <ProFeatureBadge size={14} />
+            </div>
+          }
+          value={
+            isFreeUser ? "Pro Feature" : (
+              <span style={{ color: Number(netProfit) < 0 ? 'var(--danger)' : 'inherit' }}>
+                {`Rs.${netProfit.toLocaleString('en-IN')}`}
+              </span>
+            )
+          }
           icon={TrendingUp}
           color="var(--success)"
-          subtitle={`Sales: Rs.${netSales.toLocaleString('en-IN')} | Expenses: Rs.${netExpenses.toLocaleString('en-IN')}`}
+          subtitle={isFreeUser ? "Includes expense tracking" : `Sales: Rs.${netSales.toLocaleString('en-IN')} | Expenses: Rs.${netExpenses.toLocaleString('en-IN')}`}
+          trend={profitTrend}
+          disabled={isFreeUser}
         />
         <SummaryCard
           title="Pending Payments"
@@ -443,9 +439,9 @@ const Dashboard = ({ orders, expenses, inventory = [], products, onNavigate }) =
       }}>
         <div className="card" style={{
           padding: window.innerWidth < 600 ? '1.25rem' : '1.75rem',
-          backgroundColor: upcomingScheduledDeliveries.length === 0 ? 'rgba(255, 255, 255, 0.02)' : undefined,
-          border: upcomingScheduledDeliveries.length === 0 ? '1px solid rgba(255, 255, 255, 0.05)' : undefined,
-          opacity: upcomingScheduledDeliveries.length === 0 ? 0.7 : 1
+          backgroundColor: (isFreeUser || upcomingScheduledDeliveries.length === 0) ? 'rgba(255, 255, 255, 0.02)' : undefined,
+          border: (isFreeUser || upcomingScheduledDeliveries.length === 0) ? '1px solid rgba(255, 255, 255, 0.05)' : undefined,
+          opacity: (isFreeUser || upcomingScheduledDeliveries.length === 0) ? 0.7 : 1
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
             <h3 style={{
@@ -458,8 +454,9 @@ const Dashboard = ({ orders, expenses, inventory = [], products, onNavigate }) =
             }}>
               <Calendar size={20} color={upcomingScheduledDeliveries.length === 0 ? "var(--text-muted)" : "var(--accent-primary)"} style={{ opacity: upcomingScheduledDeliveries.length === 0 ? 0.5 : 1 }} />
               Scheduled Deliveries
+              <ProFeatureBadge size={16} />
             </h3>
-            {upcomingScheduledDeliveries.length > 0 && (
+            {upcomingScheduledDeliveries.length > 0 && !isFreeUser && (
               <button
                 onClick={() => onNavigate('orders', { scheduledDeliveries: true })}
                 style={{ background: 'transparent', color: 'var(--accent-primary)', fontSize: '0.875rem', fontWeight: 600 }}
@@ -469,7 +466,12 @@ const Dashboard = ({ orders, expenses, inventory = [], products, onNavigate }) =
             )}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            {upcomingScheduledDeliveries.length === 0 ? (
+            {isFreeUser ? (
+              <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                <Crown size={32} style={{ marginBottom: '1rem', opacity: 0.5, color: 'var(--accent-primary)' }} />
+                <p>Scheduled deliveries tracking is a Pro feature</p>
+              </div>
+            ) : upcomingScheduledDeliveries.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
                 No deliveries scheduled for the next 3 days
               </div>
@@ -515,62 +517,71 @@ const Dashboard = ({ orders, expenses, inventory = [], products, onNavigate }) =
           </div>
         </div>
 
-        <div className="card" style={{
-          padding: window.innerWidth < 600 ? '1.25rem' : '1.75rem',
-          backgroundColor: criticalItems.length === 0 ? 'rgba(255, 255, 255, 0.02)' : undefined,
-          border: criticalItems.length === 0 ? '1px solid rgba(255, 255, 255, 0.05)' : undefined,
-          opacity: criticalItems.length === 0 ? 0.7 : 1
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-            <h3 style={{
-              fontSize: window.innerWidth < 600 ? '1.1rem' : '1.25rem',
-              fontWeight: 700,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.75rem',
-              color: criticalItems.length === 0 ? 'var(--text-muted)' : 'var(--text-primary)'
-            }}>
-              <AlertTriangle size={20} color={criticalItems.length === 0 ? "var(--text-muted)" : "var(--warning)"} style={{ opacity: criticalItems.length === 0 ? 0.5 : 1 }} />
-              Low Stock Alerts
-            </h3>
-            {criticalItems.length > 0 && (
-              <button
-                onClick={() => onNavigate('inventory', { stockFilter: 'below' })}
-                style={{ background: 'transparent', color: 'var(--accent-primary)', fontSize: '0.875rem', fontWeight: 600 }}
-              >
-                Inventory
-              </button>
-            )}
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            {criticalItems.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
-                All inventory levels are healthy
-              </div>
-            ) : (
-              criticalItems.slice(0, 4).map(item => (
-                <div key={item.id} style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  padding: '1rem',
-                  backgroundColor: 'rgba(239, 68, 68, 0.05)',
-                  borderRadius: '12px',
-                  border: '1px solid rgba(239, 68, 68, 0.1)',
-                  flexDirection: window.innerWidth < 400 ? 'column' : 'row',
-                  alignItems: window.innerWidth < 400 ? 'flex-start' : 'center',
-                  gap: window.innerWidth < 400 ? '0.75rem' : '0'
-                }}>
-                  <div>
-                    <h4 style={{ fontSize: '0.95rem', fontWeight: 600, marginBottom: '0.25rem' }}>{item.itemName}</h4>
-                    <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Category: {item.categoryName}</p>
-                  </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <p style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--danger)' }}>{item.currentStock} left</p>
-                    <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Level: {item.reorderLevel}</p>
-                  </div>
+        <div style={{ position: 'relative' }}>
+          <div className="card" style={{
+            padding: window.innerWidth < 600 ? '1.25rem' : '1.75rem',
+            backgroundColor: (isFreeUser || criticalItems.length === 0) ? 'rgba(255, 255, 255, 0.02)' : undefined,
+            border: (isFreeUser || criticalItems.length === 0) ? '1px solid rgba(255, 255, 255, 0.05)' : undefined,
+            opacity: (isFreeUser || criticalItems.length === 0) ? 0.7 : 1,
+            height: '100%',
+            boxSizing: 'border-box'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+              <h3 style={{
+                fontSize: window.innerWidth < 600 ? '1.1rem' : '1.25rem',
+                fontWeight: 700,
+                display: 'flex',
+                alignItems: 'center',
+                color: criticalItems.length === 0 ? 'var(--text-muted)' : 'var(--text-primary)'
+              }}>
+                <AlertTriangle size={20} color={criticalItems.length === 0 ? "var(--text-muted)" : "var(--warning)"} style={{ opacity: criticalItems.length === 0 ? 0.5 : 1, marginRight: '0.75rem' }} />
+                Low Stock Alerts
+                <ProFeatureBadge size={16} />
+              </h3>
+              {criticalItems.length > 0 && !isFreeUser && (
+                <button
+                  onClick={() => onNavigate('inventory', { stockFilter: 'below' })}
+                  style={{ background: 'transparent', color: 'var(--accent-primary)', fontSize: '0.875rem', fontWeight: 600 }}
+                >
+                  Inventory
+                </button>
+              )}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {isFreeUser ? (
+                <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                  <Crown size={32} style={{ marginBottom: '1rem', opacity: 0.5, color: 'var(--accent-primary)' }} />
+                  <p>Inventory management is a Pro feature</p>
                 </div>
-              ))
-            )}
+              ) : criticalItems.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                  All inventory levels are healthy
+                </div>
+              ) : (
+                criticalItems.slice(0, 4).map(item => (
+                  <div key={item.id} style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    padding: '1rem',
+                    backgroundColor: 'rgba(239, 68, 68, 0.05)',
+                    borderRadius: '12px',
+                    border: '1px solid rgba(239, 68, 68, 0.1)',
+                    flexDirection: window.innerWidth < 400 ? 'column' : 'row',
+                    alignItems: window.innerWidth < 400 ? 'flex-start' : 'center',
+                    gap: window.innerWidth < 400 ? '0.75rem' : '0'
+                  }}>
+                    <div>
+                      <h4 style={{ fontSize: '0.95rem', fontWeight: 600, marginBottom: '0.25rem' }}>{item.itemName}</h4>
+                      <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Category: {item.category || 'Uncategorized'}</p>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <p style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--danger)' }}>{item.currentStock} left</p>
+                      <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Level: {item.reorderLevel}</p>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -596,138 +607,115 @@ const Dashboard = ({ orders, expenses, inventory = [], products, onNavigate }) =
         marginBottom: '2.5rem'
       }}>
         {/* Daily Orders Area Chart */}
-        <div className="card" style={{ padding: '1.5rem', border: '1px solid rgba(255,255,255,0.05)' }}>
+        <div className="card" style={{ padding: '1.5rem' }}>
           <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <Activity size={18} color="var(--accent-primary)" />
             Daily Orders
           </h3>
-          <div style={{ height: '300px', width: '100%' }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={trendData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="colorOrders" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="var(--accent-primary)" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="var(--accent-primary)" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid {...chartTheme.grid} />
-                <XAxis dataKey="displayName" {...chartTheme.axis} />
-                <YAxis {...chartTheme.axis} allowDecimals={false} />
-                <Tooltip content={<CustomTooltip formatter={(val) => val} />} />
-                <Area
-                  type="monotone"
-                  dataKey="orders"
-                  stroke="var(--accent-primary)"
-                  strokeWidth={2}
-                  fillOpacity={1}
-                  fill="url(#colorOrders)"
-                  name="Orders"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
+          <BaseAreaChart
+            data={trendData}
+            dataKey="orders"
+            xAxisKey="displayName"
+            color="var(--accent-primary)"
+            gradientId="colorOrders"
+            height={300}
+            tooltipFormatter={(val) => val}
+          />
         </div>
 
         {/* Source Pie Chart */}
-        <div className="card" style={{ padding: '1.5rem', border: '1px solid rgba(255,255,255,0.05)' }}>
+        <div className="card" style={{ padding: '1.5rem' }}>
           <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <PieChartIcon size={18} color="var(--success)" />
             Order Sources
           </h3>
-          <div style={{ height: '300px', width: '100%' }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Tooltip content={<CustomTooltip formatter={(val) => val} />} />
-                <Pie
-                  data={sourceData}
-                  cx="50%"
-                  cy="50%"
-                  labelLine={true}
-                  label={renderDonutLabel}
-                  {...chartTheme.donut}
-                  dataKey="value"
-                >
-                  {sourceData.map((entry, index) => (
-                    <Cell
-                      key={`cell-${index}`}
-                      fill={COLORS[index % COLORS.length]}
-                    />
-                  ))}
-                </Pie>
-                <DonutCenterText
-                  cx="50%"
-                  cy="50%"
-                  label="Total Orders"
-                  value={totalOrdersCount}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
+          <BaseDonutChart
+            data={sourceData}
+            centerLabel="Total Orders"
+            centerValue={totalOrdersCount}
+            height={300}
+            tooltipFormatter={(val) => val}
+          />
         </div>
 
         {/* Top Selling Products Chart */}
-        <div className="card" style={{ padding: '1.5rem', border: '1px solid rgba(255,255,255,0.05)' }}>
-          <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <BarChart2 size={18} color="var(--warning)" />
-            Top Selling Products
-          </h3>
-          <div style={{ height: '300px', width: '100%' }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                layout="vertical"
-                data={topSellingProducts.slice(0, 5)}
-                margin={{ top: 5, right: 30, left: 40, bottom: 5 }}
-              >
-                <defs>
-                  {COLORS.map((color, index) => (
-                    <linearGradient key={`barGrad-${index}`} id={`barGrad-${index}`} x1="0" y1="0" x2="1" y2="0">
-                      <stop offset="0%" stopColor={color} stopOpacity={0.8} />
-                      <stop offset="100%" stopColor={color} stopOpacity={0.3} />
-                    </linearGradient>
-                  ))}
-                </defs>
-                <CartesianGrid {...chartTheme.grid} horizontal={false} />
-                <XAxis type="number" hide />
-                <YAxis
-                  dataKey="name"
-                  type="category"
-                  stroke="var(--text-muted)"
-                  fontSize={11}
-                  axisLine={false}
-                  tickLine={false}
-                  width={130}
-                />
-                <Tooltip
-                  cursor={chartTheme.tooltipCursor}
-                  content={({ active, payload }) => {
-                    if (active && payload && payload.length) {
-                      const data = payload[0].payload;
-                      return (
-                        <div style={tooltipStyle}>
-                          <p style={{ color: '#fff', fontWeight: 'bold', marginBottom: '5px' }}>{data.name}</p>
-                          <p style={{ color: '#9ca3af', fontSize: '0.8rem', marginBottom: '5px' }}>{data.category}</p>
-                          <div style={{ display: 'flex', gap: '15px' }}>
-                            <span style={{ color: '#3b82f6' }}>{data.quantity} Units</span>
-                            <span style={{ color: '#10b981' }}>{formatCurrency(data.revenue)}</span>
-                          </div>
-                        </div>
-                      );
-                    }
-                    return null;
-                  }}
-                />
-                <Bar
-                  dataKey="quantity"
-                  radius={[0, 4, 4, 0]}
-                  barSize={24}
-                >
-                  <LabelList dataKey="quantity" position="right" fill="var(--text-muted)" fontSize={11} formatter={(val) => `${val}`} />
-                  {topSellingProducts.slice(0, 5).map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+        <div style={{ position: 'relative' }}>
+          <div className="card" style={{
+            padding: '1.5rem',
+            backgroundColor: isFreeUser ? 'rgba(255, 255, 255, 0.02)' : undefined,
+            opacity: isFreeUser ? 0.7 : 1,
+            height: '100%'
+          }}>
+            <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1.5rem', display: 'flex', alignItems: 'center' }}>
+              <BarChart2 size={18} color="var(--warning)" style={{ marginRight: '0.5rem' }} />
+              Top Selling Products
+              <ProFeatureBadge size={14} />
+            </h3>
+            {!isFreeUser ? (
+              <div style={{ height: '300px', width: '100%' }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    layout="vertical"
+                    data={topSellingProducts.slice(0, 5)}
+                    margin={{ top: 5, right: 30, left: 40, bottom: 5 }}
+                  >
+                    <defs>
+                      {COLORS.map((color, index) => (
+                        <linearGradient key={`barGrad-${index}`} id={`barGrad-${index}`} x1="0" y1="0" x2="1" y2="0">
+                          <stop offset="0%" stopColor={color} stopOpacity={0.8} />
+                          <stop offset="100%" stopColor={color} stopOpacity={0.3} />
+                        </linearGradient>
+                      ))}
+                    </defs>
+                    <CartesianGrid {...chartTheme.grid} horizontal={false} />
+                    <XAxis type="number" hide />
+                    <YAxis
+                      dataKey="name"
+                      type="category"
+                      stroke="var(--text-muted)"
+                      fontSize={11}
+                      axisLine={false}
+                      tickLine={false}
+                      width={130}
+                    />
+                    <Tooltip
+                      cursor={chartTheme.tooltipCursor}
+                      content={({ active, payload }) => {
+                        if (active && payload && payload.length) {
+                          const data = payload[0].payload;
+                          return (
+                            <div style={tooltipStyle}>
+                              <p style={{ color: 'var(--text-primary)', fontWeight: 'bold', marginBottom: '5px' }}>{data.name}</p>
+                              <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginBottom: '5px' }}>{data.category}</p>
+                              <div style={{ display: 'flex', gap: '15px' }}>
+                                <span style={{ color: 'var(--accent-primary)' }}>{data.quantity} Units</span>
+                                <span style={{ color: 'var(--success)' }}>{formatCurrency(data.revenue)}</span>
+                              </div>
+                            </div>
+                          );
+                        }
+                        return null;
+                      }}
+                    />
+                    <Bar
+                      dataKey="quantity"
+                      radius={[0, 4, 4, 0]}
+                      barSize={24}
+                    >
+                      <LabelList dataKey="quantity" position="right" fill="var(--text-muted)" fontSize={11} formatter={(val) => `${val}`} />
+                      {topSellingProducts.slice(0, 5).map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                <Crown size={32} style={{ marginBottom: '1rem', opacity: 0.5, color: 'var(--accent-primary)' }} />
+                <p>Top selling products analysis is a Pro feature</p>
+              </div>
+            )}
           </div>
         </div>
 

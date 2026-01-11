@@ -9,8 +9,12 @@ import InventoryReports from './InventoryReports'
 import { filterByDateRange, getMonthlyFinancials } from '../../utils/reportUtils'
 import * as XLSX from 'xlsx'
 import { startOfMonth, endOfMonth, format } from 'date-fns'
+import ProFeatureLock from '../ProFeatureLock'
+import { useLicensing } from '../LicensingContext'
+import CollapsibleDateFilter from '../Common/CollapsibleDateFilter'
 
 const Reports = ({ orders, expenses, inventory, onUpdateOrders }) => {
+    const { isFreeUser } = useLicensing()
     const [activeTab, setActiveTab] = useState('sales')
     const [isMobile, setIsMobile] = useState(window.innerWidth < 768)
     const [showExportMenu, setShowExportMenu] = useState(false)
@@ -20,8 +24,8 @@ const Reports = ({ orders, expenses, inventory, onUpdateOrders }) => {
     const [filterType, setFilterType] = useState('month') // 'month' or 'range'
     const [selectedMonth, setSelectedMonth] = useState(format(new Date(), 'yyyy-MM'))
     const [dateRange, setDateRange] = useState({
-        start: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
-        end: format(endOfMonth(new Date()), 'yyyy-MM-dd')
+        startDate: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
+        endDate: format(endOfMonth(new Date()), 'yyyy-MM-dd')
     })
 
     useEffect(() => {
@@ -50,7 +54,10 @@ const Reports = ({ orders, expenses, inventory, onUpdateOrders }) => {
                 end: format(endOfMonth(date), 'yyyy-MM-dd')
             }
         }
-        return dateRange
+        return {
+            start: dateRange.startDate,
+            end: dateRange.endDate
+        }
     }, [filterType, selectedMonth, dateRange])
 
     // Filtered Data
@@ -165,12 +172,11 @@ const Reports = ({ orders, expenses, inventory, onUpdateOrders }) => {
         }
     }
 
-    return (
+    const content = (
         <div style={{
             padding: window.innerWidth < 450 ? '0.25rem' : (isMobile ? '0.75rem' : '1.5rem'),
             maxWidth: '100%',
-            margin: '0 auto',
-            overflowX: 'hidden'
+            margin: '0 auto'
         }}>
             <style>{`
                 .reports-header-container {
@@ -183,7 +189,7 @@ const Reports = ({ orders, expenses, inventory, onUpdateOrders }) => {
                 .reports-header h1 {
                     font-size: 1.875rem;
                     font-weight: 800;
-                    color: #fff;
+                    color: var(--text-primary);
                     margin-bottom: 0.25rem;
                     letter-spacing: -0.025em;
                     line-height: 1.2;
@@ -202,7 +208,7 @@ const Reports = ({ orders, expenses, inventory, onUpdateOrders }) => {
                     display: flex;
                     align-items: center;
                     gap: 0.5rem;
-                    background: rgba(255, 255, 255, 0.05);
+                    background: var(--bg-secondary);
                     padding: 0.4rem;
                     border-radius: 10px;
                     border: 1px solid var(--border-color);
@@ -210,13 +216,13 @@ const Reports = ({ orders, expenses, inventory, onUpdateOrders }) => {
                 .filter-input {
                     background: transparent;
                     border: none;
-                    color: #fff;
+                    color: var(--text-primary);
                     font-size: 0.85rem;
                     outline: none;
                     padding: 0.25rem 0.5rem;
                 }
                 .filter-input::-webkit-calendar-picker-indicator {
-                    filter: invert(1);
+                    filter: invert(var(--calendar-invert));
                 }
                 
                 .export-dropdown {
@@ -227,7 +233,8 @@ const Reports = ({ orders, expenses, inventory, onUpdateOrders }) => {
                     top: 100%;
                     right: 0;
                     margin-top: 0.5rem;
-                    background: #1f2937;
+                    background: var(--bg-card);
+                    backdrop-filter: blur(10px);
                     border: 1px solid var(--border-color);
                     border-radius: 10px;
                     padding: 0.5rem;
@@ -313,81 +320,24 @@ const Reports = ({ orders, expenses, inventory, onUpdateOrders }) => {
                 </div>
 
                 <div className="report-controls">
-                    <div className="filter-group">
-                        <select
-                            value={filterType}
-                            onChange={(e) => setFilterType(e.target.value)}
-                            className="filter-input"
-                            style={{ borderRight: '1px solid var(--border-color)', paddingRight: '0.5rem' }}
-                        >
-                            <option value="month">By Month</option>
-                            <option value="range">Custom Range</option>
-                        </select>
-
-                        {filterType === 'month' ? (
-                            <input
-                                type="month"
-                                value={selectedMonth}
-                                onChange={(e) => setSelectedMonth(e.target.value)}
-                                className="filter-input"
-                            />
-                        ) : (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                                <input
-                                    type="date"
-                                    value={dateRange.start}
-                                    onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
-                                    className="filter-input"
-                                />
-                                <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>to</span>
-                                <input
-                                    type="date"
-                                    value={dateRange.end}
-                                    onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
-                                    className="filter-input"
-                                />
-                            </div>
-                        )}
-                    </div>
-
-                    {(filterType !== 'month' || selectedMonth !== format(new Date(), 'yyyy-MM')) && (
-                        <button
-                            onClick={() => {
-                                setFilterType('month')
-                                setSelectedMonth(format(new Date(), 'yyyy-MM'))
-                                setDateRange({
-                                    start: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
-                                    end: format(endOfMonth(new Date()), 'yyyy-MM-dd')
-                                })
-                            }}
-                            style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '0.5rem',
-                                padding: '0.5rem 1rem',
-                                borderRadius: '6px',
-                                border: 'none',
-                                background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(239, 68, 68, 0.05))',
-                                color: '#ef4444',
-                                fontSize: '0.875rem',
-                                fontWeight: 600,
-                                cursor: 'pointer',
-                                transition: 'all 0.2s ease',
-                                whiteSpace: 'nowrap'
-                            }}
-                            onMouseEnter={(e) => {
-                                e.currentTarget.style.background = 'linear-gradient(135deg, rgba(239, 68, 68, 0.25), rgba(239, 68, 68, 0.1))'
-                                e.currentTarget.style.transform = 'translateY(-1px)'
-                            }}
-                            onMouseLeave={(e) => {
-                                e.currentTarget.style.background = 'linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(239, 68, 68, 0.05))'
-                                e.currentTarget.style.transform = 'translateY(0)'
-                            }}
-                            title="Reset to current month"
-                        >
-                            <X size={16} /> Clear
-                        </button>
-                    )}
+                    <CollapsibleDateFilter
+                        filterType={filterType}
+                        onFilterTypeChange={setFilterType}
+                        selectedMonth={selectedMonth}
+                        onMonthChange={setSelectedMonth}
+                        startDate={dateRange.startDate}
+                        endDate={dateRange.endDate}
+                        onRangeChange={setDateRange}
+                        align="right"
+                        onReset={() => {
+                            setFilterType('month')
+                            setSelectedMonth(format(new Date(), 'yyyy-MM'))
+                            setDateRange({
+                                startDate: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
+                                endDate: format(endOfMonth(new Date()), 'yyyy-MM-dd')
+                            })
+                        }}
+                    />
 
                     <div className="export-dropdown" ref={exportMenuRef}>
                         <button
@@ -450,6 +400,26 @@ const Reports = ({ orders, expenses, inventory, onUpdateOrders }) => {
             </div>
         </div>
     )
+
+    if (isFreeUser) {
+        return (
+            <ProFeatureLock
+                featureName="Reports & Analytics"
+                showContent={false}
+                features={[
+                    "Advanced Sales & Revenue Analytics",
+                    "Category-wise Expense Tracking",
+                    "Monthly Profit & Loss Analysis",
+                    "Stock Valuation & Inventory Reports",
+                    "Export to Excel & Professional Printing"
+                ]}
+            >
+                {content}
+            </ProFeatureLock>
+        )
+    }
+
+    return content
 }
 
 export default Reports

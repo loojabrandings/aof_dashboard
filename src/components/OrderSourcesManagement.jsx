@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Plus, Save, Trash2, Edit2, X, Tag } from 'lucide-react'
+import FormValidation from './FormValidation'
 import { getOrderSources, saveOrderSources, renameOrderSourceInOrders } from '../utils/storage'
+import { toTitleCase } from '../utils/textUtils'
 import ConfirmationModal from './ConfirmationModal'
 import { useToast } from './Toast/ToastContext'
 
@@ -24,6 +26,17 @@ const OrderSourcesManagement = () => {
   const [editingOriginalName, setEditingOriginalName] = useState(null)
   const [formName, setFormName] = useState('')
   const [showForm, setShowForm] = useState(false)
+  const [validationErrors, setValidationErrors] = useState({})
+
+  const getErrorStyle = (fieldName) => {
+    if (validationErrors[fieldName]) {
+      return {
+        borderColor: 'var(--danger)',
+        boxShadow: '0 0 0 2px rgba(239, 68, 68, 0.2)'
+      }
+    }
+    return {}
+  }
 
   // Modal State
   const [modalConfig, setModalConfig] = useState({
@@ -74,9 +87,15 @@ const OrderSourcesManagement = () => {
     return [...(sources || [])].sort((a, b) => (a.name || '').localeCompare(b.name || ''))
   }, [sources])
 
+
+  const currentSources = useMemo(() => {
+    return sortedSources
+  }, [sortedSources])
+
   const startAdd = () => {
     setEditingId(null)
     setFormName('')
+    setValidationErrors({})
     setShowForm(true)
   }
 
@@ -84,6 +103,7 @@ const OrderSourcesManagement = () => {
     setEditingId(src.id)
     setFormName(src.name || '')
     setEditingOriginalName(src.name || '')
+    setValidationErrors({})
     setShowForm(true)
   }
 
@@ -91,6 +111,7 @@ const OrderSourcesManagement = () => {
     setEditingId(null)
     setEditingOriginalName(null)
     setFormName('')
+    setValidationErrors({})
     setShowForm(false)
   }
 
@@ -107,18 +128,19 @@ const OrderSourcesManagement = () => {
   }
 
   const save = async () => {
-    const name = normalizeName(formName)
+    const name = toTitleCase(normalizeName(formName))
     if (!name) {
-      addToast('Please enter a source name', 'warning')
+      setValidationErrors({ name: 'Source name is required' })
       return
     }
 
     // prevent duplicates by name (case-insensitive)
     const existsByName = sources.some(s => (s.name || '').toLowerCase() === name.toLowerCase() && s.id !== editingId)
     if (existsByName) {
-      addToast('That source already exists.', 'warning')
+      setValidationErrors({ name: 'This source already exists' })
       return
     }
+    setValidationErrors({})
 
     let next
     if (editingId) {
@@ -222,10 +244,15 @@ const OrderSourcesManagement = () => {
             <input
               className="form-input"
               value={formName}
-              onChange={(e) => setFormName(e.target.value)}
+              style={getErrorStyle('name')}
+              onChange={(e) => {
+                setFormName(e.target.value)
+                if (validationErrors.name) setValidationErrors({})
+              }}
               placeholder="e.g., Ads, Organic, Marketplace, Referral"
               autoFocus
             />
+            <FormValidation message={validationErrors.name} />
           </div>
 
           <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
@@ -255,7 +282,7 @@ const OrderSourcesManagement = () => {
               </tr>
             </thead>
             <tbody>
-              {sortedSources.map((s) => (
+              {currentSources.map((s) => (
                 <tr key={s.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
                   <td style={{ padding: '0.9rem 1rem', color: 'var(--text-primary)', fontWeight: 500 }}>
                     {s.name}
@@ -278,7 +305,7 @@ const OrderSourcesManagement = () => {
           </table>
 
           <div className="sources-mobile-list">
-            {sortedSources.map((s) => (
+            {currentSources.map((s) => (
               <div key={s.id + '-mobile'} className="source-mobile-row">
                 <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{s.name}</div>
                 <div className="source-mobile-actions">
@@ -304,7 +331,7 @@ const OrderSourcesManagement = () => {
         isAlert={modalConfig.isAlert}
         confirmText={modalConfig.confirmText}
       />
-    </div>
+    </div >
   )
 }
 

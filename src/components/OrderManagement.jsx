@@ -1,5 +1,8 @@
 import { useState, useMemo, useEffect } from 'react'
-import { Plus, Search, MessageCircle, Edit, Trash2, Eye, Download, ChevronUp, ChevronDown, Paperclip, Star, Repeat, Truck, X, Loader, Calendar } from 'lucide-react'
+import { Plus, Search, MessageCircle, Edit, Trash2, Eye, Download, ChevronUp, ChevronDown, Paperclip, Star, Repeat, Truck, X, Loader, Crown, Calendar } from 'lucide-react'
+import CustomDropdown from './Common/CustomDropdown'
+import CollapsibleDateFilter from './Common/CollapsibleDateFilter'
+import Pagination from './Common/Pagination'
 import OrderForm from './OrderForm'
 import DispatchModal from './DispatchModal'
 import ViewOrderModal from './ViewOrderModal'
@@ -12,8 +15,45 @@ import { formatWhatsAppNumber, generateWhatsAppMessage } from '../utils/whatsapp
 import * as XLSX from 'xlsx'
 import { useToast } from './Toast/ToastContext'
 import { curfoxService } from '../utils/curfox'
+import { format, startOfMonth, endOfMonth, isWithinInterval, parse } from 'date-fns'
 
-const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilters = {} }) => {
+// Dropdown Options Constants
+const STATUS_OPTIONS = [
+  { value: 'all', label: 'All Status' },
+  { value: 'pendingDispatch', label: 'Pending Dispatch' },
+  { value: 'New Order', label: 'New Order' },
+  { value: 'Packed', label: 'Packed' },
+  { value: 'Dispatched', label: 'Dispatched' },
+  { value: 'returned', label: 'Returned' },
+  { value: 'refund', label: 'Refund' },
+  { value: 'cancelled', label: 'Cancelled' },
+]
+
+const PAYMENT_OPTIONS = [
+  { value: 'all', label: 'All Payment' },
+  { value: 'Paid', label: 'Paid' },
+  { value: 'Pending', label: 'Pending' },
+]
+
+const SORT_OPTIONS = [
+  { value: 'orderNumber', label: 'Order Number' },
+  { value: 'date', label: 'Date' },
+  { value: 'totalPrice', label: 'Total Price' },
+  { value: 'status', label: 'Order Status' },
+  { value: 'paymentStatus', label: 'Payment Status' },
+  { value: 'trackingNumber', label: 'Tracking Number' },
+]
+
+const BULK_STATUS_OPTIONS = [
+  { value: 'New Order', label: 'New Order' },
+  { value: 'Packed', label: 'Packed' },
+  { value: 'Dispatched', label: 'Dispatched' },
+  { value: 'returned', label: 'Returned' },
+  { value: 'refund', label: 'Refund' },
+  { value: 'cancelled', label: 'Cancelled' },
+]
+
+const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilters = {}, prefilledOrder, onClearPrefilled }) => {
   const { addToast } = useToast()
   const [showForm, setShowForm] = useState(false)
   const [showDispatchModal, setShowDispatchModal] = useState(false)
@@ -24,11 +64,11 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
   const [trackingOrder, setTrackingOrder] = useState(null)
   const [trackingTargetStatus, setTrackingTargetStatus] = useState('Packed')
   const [searchTerm, setSearchTerm] = useState(() => localStorage.getItem('aof_orders_search') || '')
-  const [statusFilter, setStatusFilter] = useState(() => initialFilters.statusFilter || localStorage.getItem('aof_orders_status_filter') || 'all')
-  const [paymentFilter, setPaymentFilter] = useState(() => initialFilters.paymentFilter || localStorage.getItem('aof_orders_payment_filter') || 'all')
+  const [statusFilter, setStatusFilter] = useState(() => initialFilters.statusFilter || 'all')
+  const [paymentFilter, setPaymentFilter] = useState(() => initialFilters.paymentFilter || 'all')
   const [scheduledDeliveriesOnly, setScheduledDeliveriesOnly] = useState(() => {
     if (initialFilters.scheduledDeliveries !== undefined) return !!initialFilters.scheduledDeliveries
-    return localStorage.getItem('aof_orders_scheduled_only') === 'true'
+    return false
   })
   const [editingStatus, setEditingStatus] = useState(null) // { orderId, field: 'status' | 'paymentStatus' }
   const [products, setProducts] = useState({ categories: [] })
@@ -50,13 +90,20 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
   const [showTrackingStatusModal, setShowTrackingStatusModal] = useState(false)
   const [trackingStatusOrder, setTrackingStatusOrder] = useState(null)
 
+  // Date Filter State
+  const [filterType, setFilterType] = useState(() => localStorage.getItem('aof_orders_filter_type') || 'month')
+  const [selectedMonth, setSelectedMonth] = useState(() => localStorage.getItem('aof_orders_selected_month') || format(new Date(), 'yyyy-MM'))
+  const [startDate, setStartDate] = useState(() => localStorage.getItem('aof_orders_start_date') || format(startOfMonth(new Date()), 'yyyy-MM-dd'))
+  const [endDate, setEndDate] = useState(() => localStorage.getItem('aof_orders_end_date') || format(endOfMonth(new Date()), 'yyyy-MM-dd'))
+  const [isDateFilterExpanded, setIsDateFilterExpanded] = useState(() => localStorage.getItem('aof_orders_date_filter_expanded') === 'true')
+
   // Pagination State
   const [currentPage, setCurrentPage] = useState(() => {
     const saved = localStorage.getItem('aof_orders_page')
     const parsed = parseInt(saved, 10)
     return isNaN(parsed) ? 1 : parsed
   })
-  const itemsPerPage = 20
+  const [itemsPerPage, setItemsPerPage] = useState(20)
 
   // Persistence effects
   useEffect(() => {
@@ -79,6 +126,26 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
     localStorage.setItem('aof_orders_page', currentPage.toString())
   }, [currentPage])
 
+  useEffect(() => {
+    localStorage.setItem('aof_orders_filter_type', filterType)
+  }, [filterType])
+
+  useEffect(() => {
+    localStorage.setItem('aof_orders_selected_month', selectedMonth)
+  }, [selectedMonth])
+
+  useEffect(() => {
+    localStorage.setItem('aof_orders_start_date', startDate)
+  }, [startDate])
+
+  useEffect(() => {
+    localStorage.setItem('aof_orders_end_date', endDate)
+  }, [endDate])
+
+  useEffect(() => {
+    localStorage.setItem('aof_orders_date_filter_expanded', isDateFilterExpanded.toString())
+  }, [isDateFilterExpanded])
+
   // Modal State
   const [modalConfig, setModalConfig] = useState({
     isOpen: false,
@@ -86,7 +153,13 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
     title: '',
     message: '',
     onConfirm: null,
-    isAlert: false
+    isAlert: false,
+    confirmText: 'Confirm',
+    cancelText: 'Cancel',
+    extraButtonText: null,
+    onExtraButtonClick: null,
+    extraButtonDisabled: false,
+    confirmDisabled: false
   })
 
   const showAlert = (title, message, type = 'default') => {
@@ -100,7 +173,7 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
     })
   }
 
-  const showConfirm = (title, message, onConfirm, type = 'default', confirmText = 'Confirm') => {
+  const showConfirm = (title, message, onConfirm, type = 'default', confirmText = 'Confirm', options = {}) => {
     setModalConfig({
       isOpen: true,
       type,
@@ -108,7 +181,12 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
       message,
       onConfirm,
       isAlert: false,
-      confirmText
+      confirmText,
+      cancelText: options.cancelText || 'Cancel',
+      extraButtonText: options.extraButtonText,
+      onExtraButtonClick: options.onExtraButtonClick,
+      extraButtonDisabled: options.extraButtonDisabled,
+      confirmDisabled: options.confirmDisabled
     })
   }
 
@@ -145,11 +223,15 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
 
   // Handle external form trigger (only when triggerFormOpen > 0)
   useEffect(() => {
-    if (triggerFormOpen && triggerFormOpen > 0) {
-      setEditingOrder(null)
+    if (triggerFormOpen > 0) {
+      if (prefilledOrder) {
+        setEditingOrder(prefilledOrder)
+      } else {
+        setEditingOrder(null)
+      }
       setShowForm(true)
     }
-  }, [triggerFormOpen])
+  }, [triggerFormOpen, prefilledOrder])
 
   const isWithinNextDays = (dateStr, days) => {
     if (!dateStr) return false
@@ -210,7 +292,30 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
         ? isWithinNextDays(order.deliveryDate, 3) && !['Dispatched', 'returned', 'refund', 'cancelled'].includes(order.status)
         : true
 
-      return matchesSearch && matchesStatus && matchesPayment && matchesScheduled
+      // Date filtering
+      let matchesDate = true
+      if (order.orderDate) {
+        try {
+          const orderDate = parse(order.orderDate, 'yyyy-MM-dd', new Date())
+
+          if (filterType === 'month') {
+            // Filter by selected month
+            const monthStart = startOfMonth(parse(selectedMonth, 'yyyy-MM', new Date()))
+            const monthEnd = endOfMonth(parse(selectedMonth, 'yyyy-MM', new Date()))
+            matchesDate = isWithinInterval(orderDate, { start: monthStart, end: monthEnd })
+          } else {
+            // Filter by custom date range
+            const rangeStart = parse(startDate, 'yyyy-MM-dd', new Date())
+            const rangeEnd = parse(endDate, 'yyyy-MM-dd', new Date())
+            matchesDate = isWithinInterval(orderDate, { start: rangeStart, end: rangeEnd })
+          }
+        } catch (error) {
+          // If date parsing fails, include the order
+          matchesDate = true
+        }
+      }
+
+      return matchesSearch && matchesStatus && matchesPayment && matchesScheduled && matchesDate
     })
 
     // Apply sorting
@@ -283,13 +388,12 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
     })
 
     return filtered
-    return filtered
-  }, [orders, searchTerm, statusFilter, paymentFilter, scheduledDeliveriesOnly, products, sortField, sortDirection])
+  }, [orders, searchTerm, statusFilter, paymentFilter, scheduledDeliveriesOnly, products, sortField, sortDirection, filterType, selectedMonth, startDate, endDate])
 
   // Reset pagination when filters change
   useEffect(() => {
     setCurrentPage(1)
-  }, [searchTerm, statusFilter, paymentFilter, scheduledDeliveriesOnly, sortField, sortDirection])
+  }, [searchTerm, statusFilter, paymentFilter, scheduledDeliveriesOnly, sortField, sortDirection, filterType, selectedMonth, startDate, endDate])
 
   // Pagination Logic
   const indexOfLastItem = currentPage * itemsPerPage
@@ -404,17 +508,39 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
       }
     }
 
-    // If status changed to Dispatched and Curfox is enabled, trigger API dispatch
+    // If status changed to Dispatched and Curfox is enabled, trigger choice modal
     if (field === 'status' && newValue === 'Dispatched' && settings?.curfox?.enabled && order) {
-      handleCurfoxDispatch(order)
+      const isCurfoxConnected = settings.curfox.email && settings.curfox.password && settings.curfox.tenant;
+
+      showConfirm(
+        'Dispatch Order',
+        'How would you like to handle this dispatch?',
+        () => handleCurfoxDispatch(order), // Confirm = Send to Courier
+        'default',
+        'Send to Courier',
+        {
+          cancelText: 'Cancel',
+          extraButtonText: 'Dispatch Locally',
+          onExtraButtonClick: async () => {
+            const updatedOrders = orders.map(o => {
+              if (o.id === orderId) {
+                return { ...o, status: 'Dispatched', dispatchDate: today }
+              }
+              return o
+            })
+            await saveOrders(updatedOrders)
+            onUpdateOrders(updatedOrders)
+            addToast('Order marked as Dispatched locally', 'success')
+          },
+          confirmDisabled: !isCurfoxConnected
+        }
+      )
       setEditingStatus(null)
       return
     }
 
-    // If status changed to Dispatched and tracking number isn't set, use Dispatch modal (captures dispatch date + tracking)
+    // If status changed to Dispatched and tracking number isn't set (Curfox is DISABLED here)
     if (field === 'status' && newValue === 'Dispatched' && order && !order.trackingNumber) {
-      // If Curfox enabled, we might want to block manual dispatch status change without API dispatch?
-      // But user might want manual override. Leaving as is for now, but usually they should use the "Dispatch Button"
       setEditingOrder({ ...order, status: 'Dispatched' })
       setShowDispatchModal(true)
       setEditingStatus(null)
@@ -796,17 +922,36 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
 
     // Special handling for Dispatched status when Curfox is enabled
     if (newStatus === 'Dispatched' && settings.curfox?.enabled) {
-      const eligibleForCurfox = ordersToUpdate.some(o => o.status === 'Packed' && o.trackingNumber)
+      const isCurfoxConnected = settings.curfox.email && settings.curfox.password && settings.curfox.tenant;
+      const packedWithWaybill = ordersToUpdate.filter(o => o.status === 'Packed' && o.trackingNumber)
 
-      if (eligibleForCurfox) {
-        // Redirect to Curfox bulk dispatch flow
-        handleBulkCurfoxDispatch()
-        return
-      } else {
-        addToast('No selected orders are eligible for Curfox Dispatch (Must be "Packed" with a Waybill ID).', 'warning')
-        // Proceed with regular status change for these non-eligible orders if user wants?
-        // Let's just proceed with regular change but show warning.
-      }
+      showConfirm(
+        'Bulk Dispatch Orders',
+        `How would you like to handle dispatch for these ${ordersToUpdate.length} orders?`,
+        () => handleBulkCurfoxDispatch(), // Confirm = Sync with Curfox
+        'default',
+        'Sync with Curfox',
+        {
+          cancelText: 'Cancel',
+          extraButtonText: 'Mark All as Locally Dispatched',
+          onExtraButtonClick: async () => {
+            const today = new Date().toISOString().split('T')[0]
+            const orderIdsToUpdate = new Set(ordersToUpdate.map(o => o.id))
+            const updatedOrders = orders.map(order => {
+              if (orderIdsToUpdate.has(order.id)) {
+                return { ...order, status: 'Dispatched', dispatchDate: today }
+              }
+              return order
+            })
+            await saveOrders(updatedOrders)
+            onUpdateOrders(updatedOrders)
+            setSelectedOrders(new Set())
+            addToast(`Marked ${ordersToUpdate.length} orders as Dispatched locally`, 'success')
+          },
+          confirmDisabled: !isCurfoxConnected || packedWithWaybill.length === 0
+        }
+      )
+      return
     }
 
     showConfirm('Confirm Status Change', `Are you sure you want to change order status to "${newStatus}" for ${ordersToUpdate.length} order(s)?`, async () => {
@@ -1039,12 +1184,7 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
       <div style={{ marginBottom: '2rem' }}>
         <div className="header-container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '1rem' }}>
           <div className="header-title-group">
-            <h1 style={{
-              fontSize: '2rem',
-              fontWeight: 700,
-              color: 'var(--text-primary)',
-              marginBottom: '0.5rem'
-            }}>
+            <h1>
               Order Management
             </h1>
             <p style={{ color: 'var(--text-muted)' }}>
@@ -1059,14 +1199,7 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
             >
               {isSelectModeActive ? 'Exit Select Mode' : 'Select'}
             </button>
-            <button
-              className="btn btn-secondary"
-              onClick={handleExport}
-              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
-            >
-              <Download size={18} />
-              Export to XLSX
-            </button>
+
             <button
               className="btn btn-primary"
               onClick={() => {
@@ -1106,41 +1239,25 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
               }}
             />
           </div>
-          <select
+          <CustomDropdown
+            options={STATUS_OPTIONS}
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            style={{ minWidth: '150px' }}
-          >
-            <option value="all">All Status</option>
-            <option value="pendingDispatch">Pending Dispatch</option>
-            <option value="New Order">New Order</option>
-            <option value="Packed">Packed</option>
-            <option value="Dispatched">Dispatched</option>
-            <option value="returned">Returned</option>
-            <option value="refund">Refund</option>
-            <option value="cancelled">Cancelled</option>
-          </select>
-          <select
+            onChange={setStatusFilter}
+            style={{ width: 'auto', minWidth: '150px' }}
+          />
+          <CustomDropdown
+            options={PAYMENT_OPTIONS}
             value={paymentFilter}
-            onChange={(e) => setPaymentFilter(e.target.value)}
-            style={{ minWidth: '150px' }}
-          >
-            <option value="all">All Payment</option>
-            <option value="Paid">Paid</option>
-            <option value="Pending">Pending</option>
-          </select>
-          <select
+            onChange={setPaymentFilter}
+            style={{ width: 'auto', minWidth: '150px' }}
+          />
+          <CustomDropdown
+            options={SORT_OPTIONS}
             value={sortField}
-            onChange={(e) => setSortField(e.target.value)}
-            style={{ minWidth: '150px' }}
-          >
-            <option value="orderNumber">Sort by: Order Number</option>
-            <option value="date">Sort by: Date</option>
-            <option value="totalPrice">Sort by: Total Price</option>
-            <option value="status">Sort by: Order Status</option>
-            <option value="paymentStatus">Sort by: Payment Status</option>
-            <option value="trackingNumber">Sort by: Tracking Number</option>
-          </select>
+            onChange={setSortField}
+            style={{ width: 'auto', minWidth: '180px' }}
+            placeholder="Sort by..."
+          />
           <button
             onClick={() => setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')}
             className="btn btn-secondary"
@@ -1160,15 +1277,42 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
               <ChevronDown size={20} />
             )}
           </button>
-          {(searchTerm !== '' || statusFilter !== 'all' || paymentFilter !== 'all' || scheduledDeliveriesOnly || sortField !== 'orderNumber' || sortDirection !== 'desc') && (
+
+
+          {/* Date Filter Button with Dropdown */}
+          <CollapsibleDateFilter
+            filterType={filterType}
+            onFilterTypeChange={setFilterType}
+            selectedMonth={selectedMonth}
+            onMonthChange={setSelectedMonth}
+            startDate={startDate}
+            endDate={endDate}
+            onRangeChange={({ startDate: newStart, endDate: newEnd }) => {
+              if (newStart) setStartDate(newStart)
+              if (newEnd) setEndDate(newEnd)
+            }}
+            onReset={() => {
+              setFilterType('month')
+              setSelectedMonth(format(new Date(), 'yyyy-MM'))
+              setStartDate(format(startOfMonth(new Date()), 'yyyy-MM-dd'))
+              setEndDate(format(endOfMonth(new Date()), 'yyyy-MM-dd'))
+            }}
+            align="right"
+          />
+
+          {(searchTerm !== '' || statusFilter !== 'all' || paymentFilter !== 'all' || scheduledDeliveriesOnly || sortField !== 'status' || sortDirection !== 'asc' || filterType !== 'month' || selectedMonth !== format(new Date(), 'yyyy-MM')) && (
             <button
               onClick={() => {
                 setSearchTerm('')
                 setStatusFilter('all')
                 setPaymentFilter('all')
                 setScheduledDeliveriesOnly(false)
-                setSortField('orderNumber')
-                setSortDirection('desc')
+                setSortField('status')
+                setSortDirection('asc')
+                setFilterType('month')
+                setSelectedMonth(format(new Date(), 'yyyy-MM'))
+                setStartDate(format(startOfMonth(new Date()), 'yyyy-MM-dd'))
+                setEndDate(format(endOfMonth(new Date()), 'yyyy-MM-dd'))
               }}
               style={{
                 display: 'flex',
@@ -1178,20 +1322,12 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
                 borderRadius: '6px',
                 border: 'none',
                 background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(239, 68, 68, 0.05))',
-                color: '#ef4444',
+                color: 'var(--danger)',
                 fontSize: '0.875rem',
                 fontWeight: 600,
                 cursor: 'pointer',
                 transition: 'all 0.2s ease',
                 whiteSpace: 'nowrap'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = 'linear-gradient(135deg, rgba(239, 68, 68, 0.25), rgba(239, 68, 68, 0.1))'
-                e.currentTarget.style.transform = 'translateY(-1px)'
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(239, 68, 68, 0.05))'
-                e.currentTarget.style.transform = 'translateY(0)'
               }}
               title="Clear all filters"
             >
@@ -1247,38 +1383,26 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
             </label>
             {selectMode === 'status' && (
               <>
-                <select
+                <CustomDropdown
+                  options={STATUS_OPTIONS.filter(o => o.value !== 'pendingDispatch')}
                   value={orderStatusSelectFilter}
-                  onChange={(e) => {
-                    setOrderStatusSelectFilter(e.target.value)
-                    // Clear manual overrides when changing filters to avoid "sticky" selection
+                  onChange={(val) => {
+                    setOrderStatusSelectFilter(val)
                     setSelectedOrders(new Set())
                     setManuallyDeselectedOrders(new Set())
                   }}
-                  style={{ minWidth: '150px' }}
-                >
-                  <option value="all">All Order Status</option>
-                  <option value="New Order">New Order</option>
-                  <option value="Packed">Packed</option>
-                  <option value="Dispatched">Dispatched</option>
-                  <option value="returned">Returned</option>
-                  <option value="refund">Refund</option>
-                  <option value="cancelled">Cancelled</option>
-                </select>
-                <select
+                  style={{ width: 'auto', minWidth: '150px' }}
+                />
+                <CustomDropdown
+                  options={PAYMENT_OPTIONS}
                   value={paymentStatusSelectFilter}
-                  onChange={(e) => {
-                    setPaymentStatusSelectFilter(e.target.value)
-                    // Clear manual overrides when changing filters to avoid "sticky" selection
+                  onChange={(val) => {
+                    setPaymentStatusSelectFilter(val)
                     setSelectedOrders(new Set())
                     setManuallyDeselectedOrders(new Set())
                   }}
-                  style={{ minWidth: '150px' }}
-                >
-                  <option value="all">All Payment Status</option>
-                  <option value="Pending">Pending</option>
-                  <option value="Paid">Paid</option>
-                </select>
+                  style={{ width: 'auto', minWidth: '150px' }}
+                />
               </>
             )}
             {isSelectModeActive && (
@@ -1288,43 +1412,36 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
             )}
             {(selectedOrders.size > 0 || (selectMode === 'status' && getStatusSelectedOrders().length > 0)) && (
               <div style={{ display: 'flex', gap: '0.5rem', marginLeft: 'auto' }}>
-                <select
-                  value=""
-                  onChange={(e) => {
-                    if (e.target.value) {
-                      handleBulkOrderStatusChange(e.target.value)
-                      e.target.value = ''
-                    }
-                  }}
-                  style={{ minWidth: '150px', fontSize: '0.875rem' }}
+                <button
+                  className="btn btn-secondary"
+                  onClick={handleExport}
+                  style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
                 >
-                  <option value="">Change Order Status...</option>
-                  <option value="New Order">New Order</option>
-                  <option value="Packed">Packed</option>
-                  <option value="Dispatched">Dispatched</option>
-                  <option value="returned">Returned</option>
-                  <option value="refund">Refund</option>
-                  <option value="cancelled">Cancelled</option>
-                </select>
-                <select
+                  <Download size={18} />
+                  Export to XLSX
+                </button>
+                <CustomDropdown
+                  options={BULK_STATUS_OPTIONS}
                   value=""
-                  onChange={(e) => {
-                    if (e.target.value) {
-                      e.target.value === 'curfox_dispatch'
-                        ? handleBulkCurfoxDispatch()
-                        : handleBulkPaymentStatusChange(e.target.value)
-                      e.target.value = ''
-                    }
+                  onChange={handleBulkOrderStatusChange}
+                  style={{ width: 'auto', minWidth: '150px' }}
+                  placeholder="Change Order Status..."
+                />
+                <CustomDropdown
+                  options={[
+                    { value: 'Pending', label: 'Pending' },
+                    { value: 'Paid', label: 'Paid' },
+                    ...(settings?.curfox?.enabled ? [{ value: 'curfox_dispatch', label: 'Dispatch (Curfox)' }] : [])
+                  ]}
+                  value=""
+                  onChange={(val) => {
+                    val === 'curfox_dispatch'
+                      ? handleBulkCurfoxDispatch()
+                      : handleBulkPaymentStatusChange(val)
                   }}
-                  style={{ minWidth: '150px', fontSize: '0.875rem' }}
-                >
-                  <option value="">Change Payment Status...</option>
-                  <option value="Pending">Pending</option>
-                  <option value="Paid">Paid</option>
-                  {settings?.curfox?.enabled && (
-                    <option value="curfox_dispatch">Dispatch (Curfox)</option>
-                  )}
-                </select>
+                  style={{ width: 'auto', minWidth: '150px' }}
+                  placeholder="Change Payment Status..."
+                />
               </div>
             )}
           </div>
@@ -1450,7 +1567,7 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
                                 title={`Invoiced: ${order.courierInvoiceNo} (${order.courierFinanceStatus})`}
                                 style={{
                                   marginLeft: '0.4rem',
-                                  color: order.courierFinanceStatus === 'Deposited' ? '#10b981' : 'var(--accent-secondary)',
+                                  color: order.courierFinanceStatus === 'Deposited' ? 'var(--success)' : 'var(--accent-secondary)',
                                   fontSize: '0.7rem',
                                   fontWeight: 700,
                                   backgroundColor: 'rgba(255,255,255,0.05)',
@@ -1495,7 +1612,7 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
                           </div>
 
                           {order.whatsapp && (
-                            <div style={{ fontSize: '0.75rem', color: '#25D366', marginTop: '0.25rem' }}>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--whatsapp-brand)', marginTop: '0.25rem' }}>
                               {formatWhatsAppNumber(order.whatsapp)}
                             </div>
                           )}
@@ -1547,16 +1664,7 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
                             onChange={(e) => handleStatusChange(order.id, 'status', e.target.value)}
                             onBlur={() => setEditingStatus(null)}
                             autoFocus
-                            style={{
-                              padding: '0.25rem 0.5rem',
-                              borderRadius: 'var(--radius)',
-                              fontSize: '0.75rem',
-                              backgroundColor: getStatusColor(order.status),
-                              color: 'white',
-                              border: '1px solid var(--border-color)',
-                              cursor: 'pointer',
-                              outline: 'none'
-                            }}
+                            className="form-input"
                           >
                             <option value="New Order">New Order</option>
                             <option value="Packed">Packed</option>
@@ -1600,16 +1708,7 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
                             onChange={(e) => handleStatusChange(order.id, 'paymentStatus', e.target.value)}
                             onBlur={() => setEditingStatus(null)}
                             autoFocus
-                            style={{
-                              padding: '0.25rem 0.5rem',
-                              borderRadius: 'var(--radius)',
-                              fontSize: '0.75rem',
-                              backgroundColor: getPaymentColor(order.paymentStatus),
-                              color: 'white',
-                              border: '1px solid var(--border-color)',
-                              cursor: 'pointer',
-                              outline: 'none'
-                            }}
+                            className="form-input"
                           >
                             <option value="Pending">Pending</option>
                             <option value="Paid">Paid</option>
@@ -1702,19 +1801,9 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
                             <Eye size={14} />
                           </button>
                           <button
-                            className="btn btn-sm btn-secondary"
+                            className="btn btn-sm btn-whatsapp"
                             onClick={() => handleWhatsApp(order)}
                             title="Send WhatsApp"
-                            style={{
-                              backgroundColor: '#25D366',
-                              color: 'white'
-                            }}
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.backgroundColor = '#20BA5A'
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.backgroundColor = '#25D366'
-                            }}
                           >
                             <MessageCircle size={14} />
                           </button>
@@ -1883,18 +1972,7 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
                         onBlur={() => setEditingStatus(null)}
                         autoFocus
                         onClick={(e) => e.stopPropagation()}
-                        style={{
-                          padding: '0.2rem 0.5rem',
-                          borderRadius: '6px',
-                          fontSize: '0.7rem',
-                          fontWeight: 600,
-                          backgroundColor: getStatusColor(order.status),
-                          color: 'white',
-                          border: '1px solid rgba(255,255,255,0.2)',
-                          cursor: 'pointer',
-                          outline: 'none',
-                          boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
-                        }}
+                        className="form-input"
                       >
                         <option value="New Order">New Order</option>
                         <option value="Packed">Packed</option>
@@ -1936,18 +2014,7 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
                         onBlur={() => setEditingStatus(null)}
                         autoFocus
                         onClick={(e) => e.stopPropagation()}
-                        style={{
-                          padding: '0.2rem 0.5rem',
-                          borderRadius: '6px',
-                          fontSize: '0.7rem',
-                          fontWeight: 600,
-                          backgroundColor: getPaymentColor(order.paymentStatus),
-                          color: 'white',
-                          border: '1px solid rgba(255,255,255,0.2)',
-                          cursor: 'pointer',
-                          outline: 'none',
-                          boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
-                        }}
+                        className="form-input"
                       >
                         <option value="Pending">Pending</option>
                         <option value="Paid">Paid</option>
@@ -2009,10 +2076,10 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
 
                 <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', paddingTop: '0.5rem' }}>
                   <div className="action-buttons" style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'center' }}>
-                    <button onClick={(e) => { e.stopPropagation(); handleWhatsApp(order); }} className="btn-icon" style={{ background: 'none', color: '#25D366', padding: 0 }}><MessageCircle size={22} /></button>
-                    <button onClick={(e) => { e.stopPropagation(); handleView(order); }} className="btn-icon" style={{ background: 'none', color: 'var(--accent-primary)', padding: 0 }}><Eye size={22} /></button>
-                    <button onClick={(e) => { e.stopPropagation(); handleEdit(order); }} className="btn-icon" style={{ background: 'none', color: 'var(--text-secondary)', padding: 0 }}><Edit size={22} /></button>
-                    <button onClick={(e) => { e.stopPropagation(); handleDeleteOrder(order.id); }} className="btn-icon danger" style={{ background: 'none', color: 'var(--danger)', padding: 0 }}><Trash2 size={22} /></button>
+                    <button onClick={(e) => { e.stopPropagation(); handleWhatsApp(order); }} className="btn-icon btn-icon-ghost whatsapp"><MessageCircle size={22} /></button>
+                    <button onClick={(e) => { e.stopPropagation(); handleView(order); }} className="btn-icon btn-icon-ghost primary"><Eye size={22} /></button>
+                    <button onClick={(e) => { e.stopPropagation(); handleEdit(order); }} className="btn-icon btn-icon-ghost muted"><Edit size={22} /></button>
+                    <button onClick={(e) => { e.stopPropagation(); handleDeleteOrder(order.id); }} className="btn-icon btn-icon-ghost danger"><Trash2 size={22} /></button>
                   </div>
                 </div>
               </div>
@@ -2023,75 +2090,14 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
 
       {/* Pagination Controls */}
       {filteredOrders.length > 0 && (
-        <div style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginTop: '1.5rem',
-          paddingTop: '1rem',
-          borderTop: '1px solid var(--border-color)',
-          flexWrap: 'wrap',
-          gap: '1rem'
-        }}>
-          <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
-            Showing <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{indexOfFirstItem + 1}</span> to <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{Math.min(indexOfLastItem, filteredOrders.length)}</span> of <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{filteredOrders.length}</span> orders
-          </div>
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-            <button
-              className="btn btn-secondary"
-              onClick={() => handlePageChange(currentPage - 1)}
-              disabled={currentPage === 1}
-              style={{
-                padding: '0.4rem 0.8rem',
-                fontSize: '0.875rem',
-                opacity: currentPage === 1 ? 0.5 : 1,
-                cursor: currentPage === 1 ? 'not-allowed' : 'pointer'
-              }}
-            >
-              Previous
-            </button>
-            <div style={{ display: 'flex', gap: '0.25rem' }}>
-              {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                // Logic to show a window of pages around current page
-                let startPage = Math.max(1, currentPage - 2)
-                if (startPage + 4 > totalPages) {
-                  startPage = Math.max(1, totalPages - 4)
-                }
-                const pageNum = startPage + i
-                return (
-                  <button
-                    key={pageNum}
-                    onClick={() => handlePageChange(pageNum)}
-                    style={{
-                      padding: '0.4rem 0.8rem',
-                      fontSize: '0.875rem',
-                      borderRadius: '6px',
-                      border: '1px solid var(--border-color)',
-                      backgroundColor: currentPage === pageNum ? 'var(--accent-primary)' : 'transparent',
-                      color: currentPage === pageNum ? 'white' : 'var(--text-primary)',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    {pageNum}
-                  </button>
-                )
-              })}
-            </div>
-            <button
-              className="btn btn-secondary"
-              onClick={() => handlePageChange(currentPage + 1)}
-              disabled={currentPage === totalPages}
-              style={{
-                padding: '0.4rem 0.8rem',
-                fontSize: '0.875rem',
-                opacity: currentPage === totalPages ? 0.5 : 1,
-                cursor: currentPage === totalPages ? 'not-allowed' : 'pointer'
-              }}
-            >
-              Next
-            </button>
-          </div>
-        </div>
+        <Pagination
+          currentPage={currentPage}
+          totalPages={Math.ceil(filteredOrders.length / itemsPerPage)}
+          onPageChange={setCurrentPage}
+          totalItems={filteredOrders.length}
+          itemsPerPage={itemsPerPage}
+          onItemsPerPageChange={setItemsPerPage}
+        />
       )}
 
 
@@ -2226,6 +2232,11 @@ const OrderManagement = ({ orders, onUpdateOrders, triggerFormOpen, initialFilte
         type={modalConfig.type}
         isAlert={modalConfig.isAlert}
         confirmText={modalConfig.confirmText}
+        cancelText={modalConfig.cancelText}
+        extraButtonText={modalConfig.extraButtonText}
+        onExtraButtonClick={modalConfig.onExtraButtonClick}
+        extraButtonDisabled={modalConfig.extraButtonDisabled}
+        confirmDisabled={modalConfig.confirmDisabled}
       />
 
 

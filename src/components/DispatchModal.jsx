@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { X, Loader } from 'lucide-react'
 import { markTrackingNumberAsUsed } from '../utils/storage'
 import TrackingNumberInput from './TrackingNumberInput'
+import CustomDatePicker from './Common/CustomDatePicker'
 import { useToast } from './Toast/ToastContext'
 
 const DispatchModal = ({ order, onClose, onSave }) => {
@@ -58,7 +59,7 @@ const DispatchModal = ({ order, onClose, onSave }) => {
 
   return (
     <div className="modal-overlay">
-      <div className="modal-content">
+      <div className="modal-content" style={{ maxWidth: '500px' }}>
         <div className="modal-header">
           <h2 className="modal-title">Update Dispatch & Tracking</h2>
           <button className="modal-close" onClick={onClose}>
@@ -66,29 +67,37 @@ const DispatchModal = ({ order, onClose, onSave }) => {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label className="form-label">Customer</label>
-            <input
-              type="text"
-              className="form-input"
-              value={order?.customerName || ''}
-              readOnly
-              style={{ backgroundColor: 'var(--bg-secondary)', cursor: 'not-allowed' }}
-            />
+        <form noValidate onSubmit={handleSubmit}>
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label">Customer</label>
+              <input
+                type="text"
+                className="form-input"
+                value={order?.customerName || ''}
+                readOnly
+                style={{ backgroundColor: 'var(--bg-secondary)', cursor: 'not-allowed' }}
+              />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Order ID</label>
+              <input
+                type="text"
+                className="form-input"
+                value={order?.id || ''}
+                readOnly
+                style={{ backgroundColor: 'var(--bg-secondary)', cursor: 'not-allowed' }}
+              />
+            </div>
           </div>
 
           <div className="form-group">
-            <label className="form-label">Order ID</label>
-            <input
-              type="text"
-              className="form-input"
-              value={order?.id || ''}
-              readOnly
-              style={{ backgroundColor: 'var(--bg-secondary)', cursor: 'not-allowed' }}
+            <label className="form-label">Dispatch Date</label>
+            <CustomDatePicker
+              value={formData.dispatchDate}
+              onChange={(val) => handleChange({ target: { name: 'dispatchDate', value: val } })}
             />
           </div>
-
 
           <div className="form-group">
             <label className="form-label">Tracking Number</label>

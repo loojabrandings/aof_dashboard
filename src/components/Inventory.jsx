@@ -1,8 +1,12 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Package, Filter, Search, AlertTriangle, CheckCircle, Plus, X, Save, History, ArrowDownLeft, ArrowUpRight, Trash2 } from 'lucide-react'
+import CustomDropdown from './Common/CustomDropdown'
+import CollapsibleDateFilter from './Common/CollapsibleDateFilter'
 import { getInventory, getInventoryCategories, saveInventory, addInventoryLog, getInventoryLogs, deleteInventoryLog } from '../utils/storage'
-
-
+import ProFeatureLock from './ProFeatureLock'
+import { useLicensing } from './LicensingContext'
+import { format, startOfMonth, endOfMonth, parse, isWithinInterval } from 'date-fns'
+import ConfirmationModal from './ConfirmationModal'
 
 // --- Quick Restock Modal ---
 const QuickRestockModal = ({ item, mode = 'add', onClose, onConfirm }) => {
@@ -34,7 +38,7 @@ const QuickRestockModal = ({ item, mode = 'add', onClose, onConfirm }) => {
           <p style={{ fontSize: '1.125rem', fontWeight: 600, color: 'var(--text-primary)' }}>{item.itemName}</p>
           <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>Current Stock: {item.currentStock}</p>
         </div>
-        <form onSubmit={handleSubmit}>
+        <form noValidate onSubmit={handleSubmit}>
           <div className="form-group">
             <label className="form-label">Quantity to {isRemove ? 'Remove' : 'Add'}</label>
             <input
@@ -52,16 +56,11 @@ const QuickRestockModal = ({ item, mode = 'add', onClose, onConfirm }) => {
 
           <div className="form-group">
             <label className="form-label">Reason / Type</label>
-            <select
-              className="form-select"
+            <CustomDropdown
+              options={typeOptions.map(opt => ({ value: opt, label: opt }))}
               value={transactionType}
-              onChange={(e) => setTransactionType(e.target.value)}
-              required
-            >
-              {typeOptions.map(opt => (
-                <option key={opt} value={opt}>{opt}</option>
-              ))}
-            </select>
+              onChange={setTransactionType}
+            />
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1.5rem' }}>
@@ -76,6 +75,7 @@ const QuickRestockModal = ({ item, mode = 'add', onClose, onConfirm }) => {
   )
 }
 const Inventory = ({ inventory, onUpdateInventory, initialFilter }) => {
+  const { isFreeUser } = useLicensing()
   const [filter, setFilter] = useState(initialFilter || 'all')
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [searchQuery, setSearchQuery] = useState('')
@@ -83,6 +83,17 @@ const Inventory = ({ inventory, onUpdateInventory, initialFilter }) => {
   const [restockConfig, setRestockConfig] = useState(null) // { item, mode }
   const [recentLogs, setRecentLogs] = useState([])
   const [showHistory, setShowHistory] = useState(false)
+  const [modalConfig, setModalConfig] = useState({ isOpen: false, title: '', message: '', type: 'default', confirmText: 'Confirm', onConfirm: null })
+
+  const showConfirm = (title, message, onConfirm, type = 'danger', confirmText = 'Confirm') => {
+    setModalConfig({ isOpen: true, title, message, onConfirm, type, confirmText })
+  }
+
+  // Date Filter State for History
+  const [filterType, setFilterType] = useState(() => localStorage.getItem('aof_inventory_filter_type') || 'month')
+  const [selectedMonth, setSelectedMonth] = useState(() => localStorage.getItem('aof_inventory_selected_month') || format(new Date(), 'yyyy-MM'))
+  const [startDate, setStartDate] = useState(() => localStorage.getItem('aof_inventory_start_date') || format(startOfMonth(new Date()), 'yyyy-MM-dd'))
+  const [endDate, setEndDate] = useState(() => localStorage.getItem('aof_inventory_end_date') || format(endOfMonth(new Date()), 'yyyy-MM-dd'))
 
   useEffect(() => {
     const loadCategories = async () => {
@@ -101,6 +112,45 @@ const Inventory = ({ inventory, onUpdateInventory, initialFilter }) => {
   useEffect(() => {
     if (initialFilter) setFilter(initialFilter)
   }, [initialFilter])
+
+  // Persist date filter state
+  useEffect(() => {
+    localStorage.setItem('aof_inventory_filter_type', filterType)
+  }, [filterType])
+
+  useEffect(() => {
+    localStorage.setItem('aof_inventory_selected_month', selectedMonth)
+  }, [selectedMonth])
+
+  useEffect(() => {
+    localStorage.setItem('aof_inventory_start_date', startDate)
+  }, [startDate])
+
+  useEffect(() => {
+    localStorage.setItem('aof_inventory_end_date', endDate)
+  }, [endDate])
+
+  // Filter logs by date
+  const filteredLogs = useMemo(() => {
+    return recentLogs.filter(log => {
+      if (!log.date) return true
+      try {
+        const logDate = new Date(log.date)
+
+        if (filterType === 'month') {
+          const monthStart = startOfMonth(parse(selectedMonth, 'yyyy-MM', new Date()))
+          const monthEnd = endOfMonth(parse(selectedMonth, 'yyyy-MM', new Date()))
+          return isWithinInterval(logDate, { start: monthStart, end: monthEnd })
+        } else {
+          const rangeStart = parse(startDate, 'yyyy-MM-dd', new Date())
+          const rangeEnd = parse(endDate, 'yyyy-MM-dd', new Date())
+          return isWithinInterval(logDate, { start: rangeStart, end: rangeEnd })
+        }
+      } catch (error) {
+        return true
+      }
+    })
+  }, [recentLogs, filterType, selectedMonth, startDate, endDate])
 
   const getUniqueCategories = () => {
     const categories = new Set()
@@ -193,14 +243,24 @@ const Inventory = ({ inventory, onUpdateInventory, initialFilter }) => {
   }
 
   const handleDeleteLog = async (logId) => {
-    if (window.confirm('Are you sure you want to delete this log entry?')) {
+    showConfirm('Delete Log Entry', 'Are you sure you want to delete this log entry?', async () => {
       await deleteInventoryLog(logId)
       loadLogs()
-    }
+    })
   }
 
-  return (
+  // Wrap entire content with ProFeatureLock for Free users
+  const content = (
     <div>
+      <ConfirmationModal
+        isOpen={modalConfig.isOpen}
+        onClose={() => setModalConfig({ ...modalConfig, isOpen: false })}
+        onConfirm={modalConfig.onConfirm}
+        title={modalConfig.title}
+        message={modalConfig.message}
+        type={modalConfig.type}
+        confirmText={modalConfig.confirmText}
+      />
       <style>{`
         @media (max-width: 600px) {
           .inventory-header h1 {
@@ -278,7 +338,7 @@ const Inventory = ({ inventory, onUpdateInventory, initialFilter }) => {
       `}</style>
 
       <div className="inventory-header" style={{ marginBottom: '2rem' }}>
-        <h1 style={{ fontSize: '2rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>Inventory</h1>
+        <h1 style={{ marginBottom: '0.5rem' }}>Inventory</h1>
         <p style={{ color: 'var(--text-muted)' }}>Manage and monitor your stock levels</p>
       </div>
 
@@ -341,8 +401,27 @@ const Inventory = ({ inventory, onUpdateInventory, initialFilter }) => {
 
       {showHistory && (
         <div className="card" style={{ marginBottom: '2rem', padding: 0, overflow: 'hidden' }}>
-          <div style={{ padding: '1rem', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ padding: '1rem', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
             <h3 style={{ fontSize: '1rem', fontWeight: 700 }}>Recent Transactions</h3>
+            <CollapsibleDateFilter
+              filterType={filterType}
+              onFilterTypeChange={setFilterType}
+              selectedMonth={selectedMonth}
+              onMonthChange={setSelectedMonth}
+              startDate={startDate}
+              endDate={endDate}
+              onRangeChange={({ startDate: newStart, endDate: newEnd }) => {
+                if (newStart) setStartDate(newStart)
+                if (newEnd) setEndDate(newEnd)
+              }}
+              onReset={() => {
+                setFilterType('month')
+                setSelectedMonth(format(new Date(), 'yyyy-MM'))
+                setStartDate(format(startOfMonth(new Date()), 'yyyy-MM-dd'))
+                setEndDate(format(endOfMonth(new Date()), 'yyyy-MM-dd'))
+              }}
+              align="right"
+            />
           </div>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '600px' }}>
@@ -357,12 +436,12 @@ const Inventory = ({ inventory, onUpdateInventory, initialFilter }) => {
                 </tr>
               </thead>
               <tbody>
-                {recentLogs.length === 0 ? (
+                {filteredLogs.length === 0 ? (
                   <tr>
-                    <td colSpan="6" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>No history available yet.</td>
+                    <td colSpan="6" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>No transactions found for the selected period.</td>
                   </tr>
                 ) : (
-                  recentLogs.map(log => {
+                  filteredLogs.map(log => {
                     const isPositive = log.quantityChange > 0
                     return (
                       <tr key={log.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
@@ -414,31 +493,29 @@ const Inventory = ({ inventory, onUpdateInventory, initialFilter }) => {
 
       {/* --- Filters --- */}
       <div className="inventory-filters" style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', padding: '0.75rem', backgroundColor: 'var(--bg-card)', borderRadius: 'var(--radius)', border: '1px solid var(--border-color)' }}>
-          <Filter size={18} color="var(--text-muted)" />
-          <select
+        <div style={{ minWidth: '180px' }}>
+          <CustomDropdown
+            options={[
+              { value: 'all', label: 'All Status' },
+              { value: 'below', label: 'Critical Only' },
+              { value: 'approaching', label: 'Low Only' },
+              { value: 'above', label: 'Good Only' }
+            ]}
             value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            style={{ border: 'none', backgroundColor: 'transparent', color: 'var(--text-primary)', outline: 'none', minWidth: '100px', width: '100%' }}
-          >
-            <option value="all">All Status</option>
-            <option value="below">Critical Only</option>
-            <option value="approaching">Low Only</option>
-            <option value="above">Good Only</option>
-          </select>
+            onChange={setFilter}
+          />
         </div>
 
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', padding: '0.75rem', backgroundColor: 'var(--bg-card)', borderRadius: 'var(--radius)', border: '1px solid var(--border-color)' }}>
-          <select
+        <div style={{ minWidth: '180px' }}>
+          <CustomDropdown
+            options={[
+              { value: 'all', label: 'All Categories' },
+              ...getUniqueCategories().map(category => ({ value: category, label: category }))
+            ]}
             value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
-            style={{ border: 'none', backgroundColor: 'transparent', color: 'var(--text-primary)', outline: 'none', minWidth: '120px', width: '100%' }}
-          >
-            <option value="all">All Categories</option>
-            {getUniqueCategories().map(category => (
-              <option key={category} value={category}>{category}</option>
-            ))}
-          </select>
+            onChange={setCategoryFilter}
+            searchable={getUniqueCategories().length > 5}
+          />
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.75rem', backgroundColor: 'var(--bg-card)', borderRadius: 'var(--radius)', border: '1px solid var(--border-color)', flex: 1, minWidth: '250px' }}>
@@ -587,11 +664,26 @@ const Inventory = ({ inventory, onUpdateInventory, initialFilter }) => {
 
     </div>
   )
+
+  // If Free user, wrap with ProFeatureLock
+  if (isFreeUser) {
+    return (
+      <ProFeatureLock
+        featureName="Inventory Management"
+        showContent={false}
+        features={[
+          "Real-time Stock Tracking & Monitoring",
+          "Low Stock Alerts & Reorder Levels",
+          "Comprehensive Usage History & Logs",
+          "Inventory Valuation & Cost Analysis"
+        ]}
+      >
+        {content}
+      </ProFeatureLock>
+    )
+  }
+
+  return content
 }
 
-
-
-
-
 export default Inventory
-

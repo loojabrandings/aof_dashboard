@@ -1,11 +1,18 @@
 import { useState, useEffect } from 'react'
 import { Plus, Edit2, Trash2, Save, X, Package, Tag } from 'lucide-react'
+import FormValidation from './FormValidation'
 import { getProducts, saveProducts } from '../utils/storage'
+import { toTitleCase } from '../utils/textUtils'
 import ConfirmationModal from './ConfirmationModal'
 import { useToast } from './Toast/ToastContext'
+import { useLicensing } from './LicensingContext'
+import Pagination from './Common/Pagination'
 
 const ProductsManagement = () => {
   const { addToast } = useToast()
+  const { isFreeUser } = useLicensing()
+  const [currentPage, setCurrentPage] = useState(1)
+  const [itemsPerPage, setItemsPerPage] = useState(20)
   const [products, setProducts] = useState({ categories: [] })
   const [editingCategory, setEditingCategory] = useState(null)
   const [editingItem, setEditingItem] = useState(null)
@@ -15,6 +22,17 @@ const ProductsManagement = () => {
   const [categoryFormData, setCategoryFormData] = useState({ name: '' })
   const [itemFormData, setItemFormData] = useState({ name: '', price: '' })
   const [selectedCategoryId, setSelectedCategoryId] = useState(null)
+  const [validationErrors, setValidationErrors] = useState({})
+
+  const getErrorStyle = (fieldName) => {
+    if (validationErrors[fieldName]) {
+      return {
+        borderColor: 'var(--danger)',
+        boxShadow: '0 0 0 2px rgba(239, 68, 68, 0.2)'
+      }
+    }
+    return {}
+  }
 
   // Modal State
   const [modalConfig, setModalConfig] = useState({
@@ -59,11 +77,12 @@ const ProductsManagement = () => {
 
   const loadProducts = async () => {
     const data = await getProducts()
-    setProducts(data)
+    const validData = data || { categories: [] }
+    setProducts(validData)
     // Initialize expanded state for all categories
     const expanded = {}
-    if (data && data.categories) {
-      data.categories.forEach(cat => {
+    if (validData.categories) {
+      validData.categories.forEach(cat => {
         expanded[cat.id] = false
       })
     }
@@ -82,22 +101,29 @@ const ProductsManagement = () => {
   }
 
   const handleAddCategory = () => {
+    if (isFreeUser && products.categories.length >= 3) {
+      addToast('Free plan limit: Maximum 3 categories allowed. Upgrade to Pro for unlimited categories.', 'error')
+      return
+    }
     setCategoryFormData({ name: '' })
     setEditingCategory(null)
+    setValidationErrors({})
     setShowCategoryForm(true)
   }
 
   const handleEditCategory = (category) => {
     setCategoryFormData({ name: category.name })
     setEditingCategory(category.id)
+    setValidationErrors({})
     setShowCategoryForm(true)
   }
 
   const handleSaveCategory = async () => {
     if (!categoryFormData.name.trim()) {
-      addToast('Please enter a category name', 'warning')
+      setValidationErrors({ name: 'Category name is required' })
       return
     }
+    setValidationErrors({})
 
     const updated = { ...products }
 
@@ -105,13 +131,13 @@ const ProductsManagement = () => {
       // Edit existing category
       const categoryIndex = updated.categories.findIndex(cat => cat.id === editingCategory)
       if (categoryIndex !== -1) {
-        updated.categories[categoryIndex].name = categoryFormData.name.trim()
+        updated.categories[categoryIndex].name = toTitleCase(categoryFormData.name.trim())
       }
     } else {
       // Add new category
       updated.categories.push({
         id: generateId(),
-        name: categoryFormData.name.trim(),
+        name: toTitleCase(categoryFormData.name.trim()),
         items: []
       })
     }
@@ -142,9 +168,17 @@ const ProductsManagement = () => {
   }
 
   const handleAddItem = (categoryId) => {
+    if (isFreeUser) {
+      const totalItems = products.categories.reduce((acc, cat) => acc + cat.items.length, 0)
+      if (totalItems >= 10) {
+        addToast('Free plan limit: Maximum 10 products allowed. Upgrade to Pro for unlimited products.', 'error')
+        return
+      }
+    }
     setItemFormData({ name: '', price: '' })
     setEditingItem(null)
     setSelectedCategoryId(categoryId)
+    setValidationErrors({})
     setShowItemForm(true)
   }
 
@@ -152,20 +186,26 @@ const ProductsManagement = () => {
     setItemFormData({ name: item.name, price: item.price.toString() })
     setEditingItem(item.id)
     setSelectedCategoryId(categoryId)
+    setValidationErrors({})
     setShowItemForm(true)
   }
 
   const handleSaveItem = async () => {
+    const errors = {}
     if (!itemFormData.name.trim()) {
-      addToast('Please enter an item name', 'warning')
-      return
+      errors.name = 'Item name is required'
     }
 
     const price = parseFloat(itemFormData.price)
     if (isNaN(price) || price < 0) {
-      addToast('Please enter a valid price', 'warning')
+      errors.price = 'Please enter a valid price'
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setValidationErrors(errors)
       return
     }
+    setValidationErrors({})
 
     const updated = { ...products }
     const categoryIndex = updated.categories.findIndex(cat => cat.id === selectedCategoryId)
@@ -174,16 +214,15 @@ const ProductsManagement = () => {
 
     if (editingItem) {
       // Edit existing item
-      const itemIndex = updated.categories[categoryIndex].items.findIndex(item => item.id === editingItem)
       if (itemIndex !== -1) {
-        updated.categories[categoryIndex].items[itemIndex].name = itemFormData.name.trim()
+        updated.categories[categoryIndex].items[itemIndex].name = toTitleCase(itemFormData.name.trim())
         updated.categories[categoryIndex].items[itemIndex].price = price
       }
     } else {
       // Add new item
       updated.categories[categoryIndex].items.push({
         id: generateId(),
-        name: itemFormData.name.trim(),
+        name: toTitleCase(itemFormData.name.trim()),
         price: price
       })
     }
@@ -217,7 +256,7 @@ const ProductsManagement = () => {
     }, 'danger', 'Delete')
   }
 
-  const selectedCategory = selectedCategoryId
+  const selectedCategory = (selectedCategoryId && products?.categories)
     ? products.categories.find(cat => cat.id === selectedCategoryId)
     : null
 
@@ -344,9 +383,13 @@ const ProductsManagement = () => {
               <input
                 type="text"
                 value={categoryFormData.name}
-                onChange={(e) => setCategoryFormData({ name: e.target.value })}
+                onChange={(e) => {
+                  setCategoryFormData({ name: e.target.value })
+                  if (validationErrors.name) setValidationErrors({})
+                }}
                 placeholder="e.g., Mommy Frames, Plymount"
                 className="form-input"
+                style={getErrorStyle('name')}
                 autoFocus
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') handleSaveCategory()
@@ -357,6 +400,7 @@ const ProductsManagement = () => {
                   }
                 }}
               />
+              <FormValidation message={validationErrors.name} />
             </div>
 
             <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', marginTop: '1.5rem' }}>
@@ -420,11 +464,16 @@ const ProductsManagement = () => {
               <input
                 type="text"
                 value={itemFormData.name}
-                onChange={(e) => setItemFormData({ ...itemFormData, name: e.target.value })}
+                onChange={(e) => {
+                  setItemFormData({ ...itemFormData, name: e.target.value })
+                  if (validationErrors.name) setValidationErrors(p => ({ ...p, name: null }))
+                }}
                 placeholder="e.g., Wall Frame Couple, 4x6"
                 className="form-input"
+                style={getErrorStyle('name')}
                 autoFocus
               />
+              <FormValidation message={validationErrors.name} />
             </div>
 
             <div className="form-group">
@@ -434,9 +483,13 @@ const ProductsManagement = () => {
                 min="0"
                 step="0.01"
                 value={itemFormData.price}
-                onChange={(e) => setItemFormData({ ...itemFormData, price: e.target.value })}
+                onChange={(e) => {
+                  setItemFormData({ ...itemFormData, price: e.target.value })
+                  if (validationErrors.price) setValidationErrors(p => ({ ...p, price: null }))
+                }}
                 placeholder="e.g., 1590"
                 className="form-input"
+                style={getErrorStyle('price')}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') handleSaveItem()
                   if (e.key === 'Escape') {
@@ -447,6 +500,7 @@ const ProductsManagement = () => {
                   }
                 }}
               />
+              <FormValidation message={validationErrors.price} />
             </div>
 
             <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', marginTop: '1.5rem' }}>
@@ -475,7 +529,7 @@ const ProductsManagement = () => {
       )}
 
       {/* Categories List */}
-      {products.categories.length === 0 ? (
+      {(!products || !products.categories || products.categories.length === 0) ? (
         <div className="card" style={{
           padding: '3rem',
           textAlign: 'center',
@@ -487,7 +541,7 @@ const ProductsManagement = () => {
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          {products.categories.map((category) => (
+          {products.categories.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((category) => (
             <div key={category.id} className="card">
               {/* Category Header */}
               <div className="category-header" style={{
@@ -658,6 +712,14 @@ const ProductsManagement = () => {
               )}
             </div>
           ))}
+          <Pagination
+            currentPage={currentPage}
+            totalPages={Math.ceil(products.categories.length / itemsPerPage)}
+            onPageChange={setCurrentPage}
+            totalItems={products.categories.length}
+            itemsPerPage={itemsPerPage}
+            onItemsPerPageChange={setItemsPerPage}
+          />
         </div>
       )}
       <ConfirmationModal

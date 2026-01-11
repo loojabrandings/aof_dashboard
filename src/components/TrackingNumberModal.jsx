@@ -62,7 +62,7 @@ const TrackingNumberModal = ({ order, targetStatus = 'Packed', onClose, onSave }
           </button>
         </div>
 
-        <form onSubmit={handleSubmit}>
+        <form noValidate onSubmit={handleSubmit}>
           <div className="form-group">
             <label className="form-label">Order ID</label>
             <input

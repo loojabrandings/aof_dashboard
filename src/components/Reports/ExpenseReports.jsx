@@ -1,10 +1,9 @@
 import { useMemo } from 'react'
-import {
-    BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend
-} from 'recharts'
+import BaseBarChart from '../Common/Charts/BaseBarChart'
+import BaseDonutChart from '../Common/Charts/BaseDonutChart'
 import { formatCurrency, calculateExpenseMetrics } from '../../utils/reportUtils'
 
-import { COLORS, CustomTooltip, chartTheme, DonutCenterText, renderDonutLabel } from './ChartConfig'
+import { COLORS } from './ChartConfig'
 
 const ExpenseReports = ({ expenses, orders, isMobile }) => {
     const metrics = useMemo(() => calculateExpenseMetrics(expenses, orders), [expenses, orders])
@@ -82,64 +81,39 @@ const ExpenseReports = ({ expenses, orders, isMobile }) => {
                 {/* Categorized Breakdown Pie */}
                 <div className="card" style={{ padding: isMobile ? '1rem' : '1.5rem' }}>
                     <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1.25rem' }}>Spend Distribution</h3>
-                    <div style={{ height: '260px', width: '100%' }}>
-                        <ResponsiveContainer>
-                            <PieChart>
-                                <Tooltip content={<CustomTooltip />} />
-                                <Pie
-                                    data={metrics.categoryData}
-                                    cx="50%" cy="50%"
-                                    {...chartTheme.donut}
-                                    dataKey="value"
-                                    label={renderDonutLabel}
-                                    labelLine={false}
-                                >
-                                    {metrics.categoryData.map((entry, index) => (
-                                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                                    ))}
-                                </Pie>
-                                <DonutCenterText
-                                    cx="50%"
-                                    cy="50%"
-                                    label="Total Spend"
-                                    value={formatCurrency(metrics.total)}
-                                />
-                            </PieChart>
-                        </ResponsiveContainer>
-                    </div>
+                    <BaseDonutChart
+                        data={metrics.categoryData}
+                        centerLabel="Total Spend"
+                        centerValue={formatCurrency(metrics.total)}
+                        height={260}
+                    />
                 </div>
 
                 {/* Category Breakdown Bar - Existing Logic */}
                 <div className="card" style={{ padding: isMobile ? '1rem' : '1.5rem' }}>
                     <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1.25rem' }}>Expenses by Category</h3>
-                    <div style={{ height: '260px', width: '100%' }}>
-                        <ResponsiveContainer>
-                            <BarChart data={metrics.categoryData} layout="vertical" margin={{ left: -10, right: 10 }}>
-                                <CartesianGrid {...chartTheme.grid} />
-                                <XAxis type="number" {...chartTheme.axis} />
-                                <YAxis dataKey="name" type="category" width={80} {...chartTheme.axis} />
-                                <Tooltip content={<CustomTooltip />} />
-                                <Bar dataKey="value" fill="#ef4444" radius={[0, 4, 4, 0]} barSize={20} />
-                            </BarChart>
-                        </ResponsiveContainer>
-                    </div>
+                    <BaseBarChart
+                        data={metrics.categoryData}
+                        layout="vertical"
+                        barKeys={[{ key: 'value', color: COLORS[3] }]}
+                        xAxisKey="name"
+                        height={260}
+                        barSize={20}
+                    />
                 </div>
             </div>
 
             {/* Monthly Trend */}
             <div className="card" style={{ padding: isMobile ? '1rem' : '1.5rem' }}>
                 <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1.25rem' }}>Monthly Expense Trend</h3>
-                <div style={{ height: '220px', width: '100%' }}>
-                    <ResponsiveContainer>
-                        <BarChart data={trendData} margin={{ left: -20 }}>
-                            <CartesianGrid {...chartTheme.grid} />
-                            <XAxis dataKey="date" {...chartTheme.axis} />
-                            <YAxis {...chartTheme.axis} tickFormatter={(val) => `${val / 1000}k`} />
-                            <Tooltip content={<CustomTooltip />} />
-                            <Bar dataKey="amount" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={24} />
-                        </BarChart>
-                    </ResponsiveContainer>
-                </div>
+                <BaseBarChart
+                    data={trendData}
+                    barKeys={[{ key: 'amount', color: COLORS[0] }]}
+                    xAxisKey="date"
+                    height={220}
+                    barSize={24}
+                    tickFormatter={(val) => `${val / 1000}k`}
+                />
             </div>
 
             {/* Top Spending Items Table */}

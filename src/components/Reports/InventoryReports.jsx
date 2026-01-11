@@ -1,10 +1,8 @@
 import { useMemo, useState, useEffect } from 'react'
-import {
-    PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer
-} from 'recharts'
+import BaseDonutChart from '../Common/Charts/BaseDonutChart'
 import { formatCurrency, calculateInventoryMetrics } from '../../utils/reportUtils'
 
-import { COLORS, CustomTooltip, chartTheme, DonutCenterText, renderDonutLabel } from './ChartConfig'
+import { COLORS } from './ChartConfig'
 
 const InventoryReports = ({ inventory, isMobile }) => {
     const { statusData, lowStockItems, totalValue, stockAlerts } = useMemo(() =>
@@ -54,31 +52,13 @@ const InventoryReports = ({ inventory, isMobile }) => {
 
             <div className="card" style={{ padding: isMobile ? '1rem' : '1.5rem' }}>
                 <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1.25rem' }}>Stock Status</h3>
-                <div style={{ height: '240px', width: '100%' }}>
-                    <ResponsiveContainer>
-                        <PieChart>
-                            <Tooltip content={<CustomTooltip formatter={(val) => val} />} />
-                            <Pie
-                                data={statusData}
-                                cx="50%" cy="50%"
-                                {...chartTheme.donut}
-                                dataKey="value"
-                                label={renderDonutLabel}
-                                labelLine={false}
-                            >
-                                {statusData.map((entry, index) => (
-                                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                                ))}
-                            </Pie>
-                            <DonutCenterText
-                                cx="50%"
-                                cy="50%"
-                                label="Total Items"
-                                value={statusData.reduce((acc, curr) => acc + curr.value, 0)}
-                            />
-                        </PieChart>
-                    </ResponsiveContainer>
-                </div>
+                <BaseDonutChart
+                    data={statusData}
+                    centerLabel="Total Items"
+                    centerValue={statusData.reduce((acc, curr) => acc + curr.value, 0)}
+                    height={240}
+                    tooltipFormatter={(val) => val}
+                />
             </div>
 
             <div className="card" style={{ padding: '0', overflow: 'hidden' }}>

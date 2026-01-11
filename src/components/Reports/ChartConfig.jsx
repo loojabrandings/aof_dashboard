@@ -18,25 +18,25 @@ export const COLORS = [
 // Shared Theme Configuration
 export const chartTheme = {
     axis: {
-        stroke: "#e5e7eb",
+        stroke: "var(--text-muted)",
         fontSize: 12,
         tickLine: false,
         axisLine: false,
     },
     grid: {
         strokeDasharray: "3 3",
-        stroke: "rgba(255,255,255,0.05)",
+        stroke: "var(--border-color)",
         vertical: false,
     },
     legend: {
         wrapperStyle: {
             fontSize: '12px',
-            color: '#9ca3af',
+            color: 'var(--text-muted)',
             paddingTop: '10px'
         }
     },
     tooltipCursor: {
-        fill: 'rgba(255,255,255,0.05)'
+        fill: 'var(--bg-secondary)'
     },
     pie: {
         stroke: "none"
@@ -99,11 +99,12 @@ export const renderDonutLabel = (props) => {
 };
 
 export const tooltipStyle = {
-    backgroundColor: '#1f2937',
-    border: '1px solid rgba(255,255,255,0.1)',
+    backgroundColor: 'var(--modal-bg)',
+    backdropFilter: 'blur(8px)',
+    border: '1px solid var(--border-color)',
     borderRadius: '8px',
     padding: '0.75rem',
-    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.5)',
+    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.2)',
     zIndex: 1000
 };
 
@@ -111,7 +112,7 @@ export const CustomTooltip = ({ active, payload, label, formatter }) => {
     if (active && payload && payload.length) {
         return (
             <div style={tooltipStyle}>
-                {label && <p style={{ color: '#9ca3af', fontSize: '0.75rem', marginBottom: '0.25rem' }}>{label}</p>}
+                {label && <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginBottom: '0.25rem' }}>{label}</p>}
                 {payload.map((entry, index) => {
                     // Handle cases where entry.name might be missing or entry.value needs formatting
                     const name = entry.name || entry.dataKey;
@@ -136,14 +137,14 @@ export const CustomTooltip = ({ active, payload, label, formatter }) => {
                         <div key={index} style={{ display: 'flex', flexDirection: 'column', marginBottom: '0.25rem' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                                 <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: color }}></div>
-                                <span style={{ color: '#e5e7eb', fontSize: '0.85rem', fontWeight: 500 }}>
-                                    {name}: <span style={{ color: '#fff', marginLeft: '4px' }}>{formattedValue}</span>
+                                <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', fontWeight: 500 }}>
+                                    {name}: <span style={{ color: 'var(--text-primary)', marginLeft: '4px' }}>{formattedValue}</span>
                                 </span>
                             </div>
                             {/* Special case for Orders chart to show hidden revenue data */}
                             {name === 'Orders' && entry.payload?.revenue !== undefined && (
                                 <div style={{ paddingLeft: '1rem', marginTop: '2px' }}>
-                                    <span style={{ color: '#9ca3af', fontSize: '0.75rem' }}>
+                                    <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
                                         Rev: {formatCurrency(entry.payload.revenue)}
                                     </span>
                                 </div>

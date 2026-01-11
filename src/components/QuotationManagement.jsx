@@ -1,14 +1,20 @@
 import { useState, useMemo, useEffect } from 'react'
-import { Plus, Search, Edit, Trash2, Repeat, Loader, MessageCircle, FileText, Eye } from 'lucide-react' // Using available icons
+import { Plus, Search, Edit, Trash2, Repeat, Loader, MessageCircle, FileText, Eye, X, Crown, Filter, ChevronUp, ChevronDown, Calendar } from 'lucide-react'
 import { saveQuotations, getQuotations, deleteQuotation, getProducts, getSettings } from '../utils/storage'
 import { formatWhatsAppNumber, generateWhatsAppMessage } from '../utils/whatsapp'
+import { useLicensing } from './LicensingContext'
 import { useToast } from './Toast/ToastContext'
+import ProFeatureLock from './ProFeatureLock'
 import QuotationForm from './QuotationForm'
 import ViewQuotationModal from './ViewQuotationModal'
 import ConfirmationModal from './ConfirmationModal'
+import CollapsibleDateFilter from './Common/CollapsibleDateFilter'
+import CustomDropdown from './Common/CustomDropdown'
+import { format, startOfMonth, endOfMonth, parse, isWithinInterval } from 'date-fns'
 
 const QuotationManagement = ({ quotations, onUpdateQuotations, orders, onUpdateOrders }) => {
     const { addToast } = useToast()
+    const { isFreeUser } = useLicensing()
     const [showForm, setShowForm] = useState(false)
     const [viewingQuotation, setViewingQuotation] = useState(null)
     const [viewingDetails, setViewingDetails] = useState(null)
@@ -25,14 +31,42 @@ const QuotationManagement = ({ quotations, onUpdateQuotations, orders, onUpdateO
     })
     const [settings, setSettings] = useState(null)
 
+    // Date Filter State
+    const [filterType, setFilterType] = useState(() => localStorage.getItem('aof_quotations_filter_type') || 'month')
+    const [selectedMonth, setSelectedMonth] = useState(() => localStorage.getItem('aof_quotations_selected_month') || format(new Date(), 'yyyy-MM'))
+    const [startDate, setStartDate] = useState(() => localStorage.getItem('aof_quotations_start_date') || format(startOfMonth(new Date()), 'yyyy-MM-dd'))
+    const [endDate, setEndDate] = useState(() => localStorage.getItem('aof_quotations_end_date') || format(endOfMonth(new Date()), 'yyyy-MM-dd'))
+    const [statusFilter, setStatusFilter] = useState(() => localStorage.getItem('aof_quotations_status_filter') || 'all')
+
     useEffect(() => {
         getProducts().then(setProducts)
         getSettings().then(setSettings)
     }, [])
 
-    // Filter Logic
+    // Persist date filter state
+    useEffect(() => {
+        localStorage.setItem('aof_quotations_filter_type', filterType)
+    }, [filterType])
+
+    useEffect(() => {
+        localStorage.setItem('aof_quotations_selected_month', selectedMonth)
+    }, [selectedMonth])
+
+    useEffect(() => {
+        localStorage.setItem('aof_quotations_start_date', startDate)
+    }, [startDate])
+
+    useEffect(() => {
+        localStorage.setItem('aof_quotations_end_date', endDate)
+    }, [endDate])
+
+    useEffect(() => {
+        localStorage.setItem('aof_quotations_status_filter', statusFilter)
+    }, [statusFilter])
+
+    // Filter & Sort Logic
     const filteredQuotations = useMemo(() => {
-        return (quotations || []).filter(q => {
+        let filtered = (quotations || []).filter(q => {
             const searchLower = searchTerm.toLowerCase()
             // Search logic (Customer, ID, Items)
             const matchesSearch =
@@ -40,9 +74,37 @@ const QuotationManagement = ({ quotations, onUpdateQuotations, orders, onUpdateO
                 (q.customerName?.toLowerCase().includes(searchLower)) ||
                 (q.phone?.toLowerCase().includes(searchLower))
 
-            return matchesSearch
+            // Date filtering
+            let matchesDate = true
+            if (q.createdDate) {
+                try {
+                    const quotationDate = parse(q.createdDate, 'yyyy-MM-dd', new Date())
+
+                    if (filterType === 'month') {
+                        const monthStart = startOfMonth(parse(selectedMonth, 'yyyy-MM', new Date()))
+                        const monthEnd = endOfMonth(parse(selectedMonth, 'yyyy-MM', new Date()))
+                        matchesDate = isWithinInterval(quotationDate, { start: monthStart, end: monthEnd })
+                    } else {
+                        const rangeStart = parse(startDate, 'yyyy-MM-dd', new Date())
+                        const rangeEnd = parse(endDate, 'yyyy-MM-dd', new Date())
+                        matchesDate = isWithinInterval(quotationDate, { start: rangeStart, end: rangeEnd })
+                    }
+                } catch (error) {
+                    matchesDate = true
+                }
+            }
+
+            // Status filtering
+            const matchesStatus = statusFilter === 'all' || (q.status || 'Draft') === statusFilter
+
+            return matchesSearch && matchesDate && matchesStatus
         })
-    }, [quotations, searchTerm])
+
+        // Default Sorting Logic (ID Descending)
+        filtered.sort((a, b) => (parseInt(b.id) || 0) - (parseInt(a.id) || 0))
+
+        return filtered
+    }, [quotations, searchTerm, filterType, selectedMonth, startDate, endDate, statusFilter])
 
     const handleSaveQuotation = async (quotationData) => {
         setIsProcessing(true)
@@ -239,7 +301,7 @@ const QuotationManagement = ({ quotations, onUpdateQuotations, orders, onUpdateO
         addToast('WhatsApp message initiated.', 'info');
     };
 
-    return (
+    const content = (
         <div className="quotation-management">
             <style>{`
                 @media (max-width: 768px) {
@@ -272,19 +334,19 @@ const QuotationManagement = ({ quotations, onUpdateQuotations, orders, onUpdateO
                 }
             `}</style>
             <div className="header-actions" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                <h1 style={{ fontSize: '1.5rem', fontWeight: 700, margin: 0 }}>Quotations</h1>
+                <h1 style={{ margin: 0 }}>Quotations</h1>
                 <button className="btn btn-primary" onClick={() => { setViewingQuotation(null); setShowForm(true); }}>
                     <Plus size={18} /> Add Quotation
                 </button>
             </div>
 
 
-            <div className="filters-bar" style={{ marginBottom: '1rem', display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
-                <div className="search-box" style={{ position: 'relative', flex: '1', minWidth: '200px', maxWidth: '300px' }}>
+            <div className="filters-bar" style={{ marginBottom: '1rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center', width: '100%' }}>
+                <div className="search-box" style={{ position: 'relative', flex: '1', minWidth: '200px' }}>
                     <Search size={18} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                     <input
                         type="text"
-                        placeholder="Search quotations..."
+                        placeholder="Search by ID, customer or phone..."
                         style={{
                             width: '100%',
                             padding: '0.5rem 0.5rem 0.5rem 2.2rem',
@@ -297,9 +359,48 @@ const QuotationManagement = ({ quotations, onUpdateQuotations, orders, onUpdateO
                         onChange={(e) => setSearchTerm(e.target.value)}
                     />
                 </div>
-                {searchTerm && (
+                <div style={{ width: '140px' }}>
+                    <CustomDropdown
+                        options={[
+                            { value: 'all', label: 'All Status' },
+                            { value: 'Active', label: 'Active' },
+                            { value: 'Draft', label: 'Draft' },
+                            { value: 'Order Received', label: 'Order Received' }
+                        ]}
+                        value={statusFilter}
+                        onChange={setStatusFilter}
+                    />
+                </div>
+                <CollapsibleDateFilter
+                    filterType={filterType}
+                    onFilterTypeChange={setFilterType}
+                    selectedMonth={selectedMonth}
+                    onMonthChange={setSelectedMonth}
+                    startDate={startDate}
+                    endDate={endDate}
+                    onRangeChange={({ startDate: newStart, endDate: newEnd }) => {
+                        if (newStart) setStartDate(newStart)
+                        if (newEnd) setEndDate(newEnd)
+                    }}
+                    onReset={() => {
+                        setFilterType('month')
+                        setSelectedMonth(format(new Date(), 'yyyy-MM'))
+                        setStartDate(format(startOfMonth(new Date()), 'yyyy-MM-dd'))
+                        setEndDate(format(endOfMonth(new Date()), 'yyyy-MM-dd'))
+                        setStatusFilter('all')
+                    }}
+                    align="right"
+                />
+                {(searchTerm !== '' || statusFilter !== 'all' || filterType !== 'month' || selectedMonth !== format(new Date(), 'yyyy-MM')) && (
                     <button
-                        onClick={() => setSearchTerm('')}
+                        onClick={() => {
+                            setSearchTerm('')
+                            setStatusFilter('all')
+                            setFilterType('month')
+                            setSelectedMonth(format(new Date(), 'yyyy-MM'))
+                            setStartDate(format(startOfMonth(new Date()), 'yyyy-MM-dd'))
+                            setEndDate(format(endOfMonth(new Date()), 'yyyy-MM-dd'))
+                        }}
                         style={{
                             display: 'flex',
                             alignItems: 'center',
@@ -425,13 +526,12 @@ const QuotationManagement = ({ quotations, onUpdateQuotations, orders, onUpdateO
                                             </td>
                                             <td style={{ padding: '0.75rem 1rem' }}>
                                                 <span style={{
-                                                    padding: '0.25rem 0.5rem',
-                                                    borderRadius: 'var(--radius)',
+                                                    padding: '0.25rem 0.75rem',
+                                                    borderRadius: '6px',
                                                     fontSize: '0.75rem',
-                                                    fontWeight: 500,
-                                                    backgroundColor: q.status === 'Order Received' ? '#10b981' : 'var(--bg-secondary)', // Green for converted, Gray for Draft
-                                                    color: q.status === 'Order Received' ? 'white' : 'var(--text-secondary)',
-                                                    border: '1px solid var(--border-color)'
+                                                    fontWeight: 600,
+                                                    backgroundColor: q.status === 'Order Received' ? 'var(--success)' : 'var(--accent-primary)',
+                                                    color: 'white'
                                                 }}>
                                                     {q.status || 'Draft'}
                                                 </span>
@@ -443,43 +543,42 @@ const QuotationManagement = ({ quotations, onUpdateQuotations, orders, onUpdateO
                                                         onClick={() => setViewingDetails(q)}
                                                         title="View Quotation"
                                                         style={{
-                                                            backgroundColor: '#3b82f6',
+                                                            backgroundColor: 'var(--accent-primary)',
                                                             color: 'white',
                                                             padding: '0.4rem',
                                                             borderRadius: '8px',
                                                             border: 'none',
                                                             cursor: 'pointer',
-                                                            transition: 'transform 0.1s',
+                                                            transition: 'all 0.2s ease',
                                                             display: 'flex',
                                                             alignItems: 'center',
                                                             justifyContent: 'center'
                                                         }}
-                                                        onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
-                                                        onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
                                                     >
                                                         <Eye size={16} />
                                                     </button>
 
                                                     <button
                                                         className="btn-icon"
-                                                        title="WhatsApp"
+                                                        title={isFreeUser ? 'WhatsApp is a Pro feature' : 'WhatsApp'}
                                                         onClick={() => handleSendWhatsApp(q)}
+                                                        disabled={isFreeUser}
                                                         style={{
-                                                            backgroundColor: '#22c55e',
+                                                            backgroundColor: isFreeUser ? 'var(--text-muted)' : 'var(--success)',
                                                             color: 'white',
                                                             padding: '0.4rem',
                                                             borderRadius: '8px',
                                                             border: 'none',
-                                                            cursor: 'pointer',
-                                                            transition: 'transform 0.1s',
+                                                            cursor: isFreeUser ? 'not-allowed' : 'pointer',
+                                                            opacity: isFreeUser ? 0.6 : 1,
+                                                            transition: 'all 0.2s ease',
                                                             display: 'flex',
                                                             alignItems: 'center',
                                                             justifyContent: 'center'
                                                         }}
-                                                        onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
-                                                        onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
                                                     >
                                                         <MessageCircle size={16} />
+                                                        {isFreeUser && <Crown size={10} color="var(--danger)" />}
                                                     </button>
 
                                                     {q.status !== 'Order Received' && (
@@ -488,19 +587,17 @@ const QuotationManagement = ({ quotations, onUpdateQuotations, orders, onUpdateO
                                                             title="Convert to Order"
                                                             onClick={() => handleConvertToOrder(q)}
                                                             style={{
-                                                                backgroundColor: '#8b5cf6',
+                                                                backgroundColor: 'var(--warning)',
                                                                 color: 'white',
                                                                 padding: '0.4rem',
                                                                 borderRadius: '8px',
                                                                 border: 'none',
                                                                 cursor: 'pointer',
-                                                                transition: 'transform 0.1s',
+                                                                transition: 'all 0.2s ease',
                                                                 display: 'flex',
                                                                 alignItems: 'center',
                                                                 justifyContent: 'center'
                                                             }}
-                                                            onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
-                                                            onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
                                                         >
                                                             <Repeat size={16} />
                                                         </button>
@@ -510,19 +607,17 @@ const QuotationManagement = ({ quotations, onUpdateQuotations, orders, onUpdateO
                                                         onClick={() => { setViewingQuotation(q); setShowForm(true); }}
                                                         title="Edit Quotation"
                                                         style={{
-                                                            backgroundColor: '#27272a',
-                                                            color: 'white',
+                                                            backgroundColor: 'var(--bg-secondary)',
+                                                            color: 'var(--text-primary)',
                                                             padding: '0.4rem',
                                                             borderRadius: '8px',
-                                                            border: 'none',
+                                                            border: '1px solid var(--border-color)',
                                                             cursor: 'pointer',
-                                                            transition: 'transform 0.1s',
+                                                            transition: 'all 0.2s ease',
                                                             display: 'flex',
                                                             alignItems: 'center',
                                                             justifyContent: 'center'
                                                         }}
-                                                        onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
-                                                        onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
                                                     >
                                                         <Edit size={16} />
                                                     </button>
@@ -531,19 +626,17 @@ const QuotationManagement = ({ quotations, onUpdateQuotations, orders, onUpdateO
                                                         onClick={() => handleDeleteQuotation(q.id)}
                                                         title="Delete Quotation"
                                                         style={{
-                                                            backgroundColor: '#ef4444',
+                                                            backgroundColor: 'var(--danger)',
                                                             color: 'white',
                                                             padding: '0.4rem',
                                                             borderRadius: '8px',
                                                             border: 'none',
                                                             cursor: 'pointer',
-                                                            transition: 'transform 0.1s',
+                                                            transition: 'all 0.2s ease',
                                                             display: 'flex',
                                                             alignItems: 'center',
                                                             justifyContent: 'center'
                                                         }}
-                                                        onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
-                                                        onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
                                                     >
                                                         <Trash2 size={16} />
                                                     </button>
@@ -559,7 +652,7 @@ const QuotationManagement = ({ quotations, onUpdateQuotations, orders, onUpdateO
             </div>
 
             {/* Mobile Card View */}
-            <div className="mobile-view">
+            <div className="mobile-view" style={{ display: 'none', flexDirection: 'column', gap: '1rem' }}>
                 {filteredQuotations.length === 0 ? (
                     <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)', backgroundColor: 'var(--bg-card)', borderRadius: 'var(--radius)', border: '1px solid var(--border-color)' }}>
                         No quotations found.
@@ -573,88 +666,102 @@ const QuotationManagement = ({ quotations, onUpdateQuotations, orders, onUpdateO
                         const categoryId = firstItem.categoryId
                         const category = products.categories.find(c => c.id === categoryId)
                         const categoryName = category ? category.name : 'N/A'
+                        const totalPrice = Number(q.totalPrice) || 0
 
                         return (
-                            <div key={q.id} className="card" style={{ padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                            <div
+                                key={q.id}
+                                className="card"
+                                style={{
+                                    padding: '1rem',
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    gap: '1rem',
+                                    backgroundColor: 'var(--bg-card)',
+                                    position: 'relative'
+                                }}
+                            >
+                                {/* Header Row: ID + Date on left, Status badge on right */}
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                                    <div>
-                                        <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--accent-primary)' }}>#{q.id}</div>
-                                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{q.createdDate}</div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                        <div>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                                <span style={{ fontWeight: 700, color: 'var(--accent-primary)', fontSize: '1.1rem' }}>#{q.id}</span>
+                                            </div>
+                                            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                                                {q.createdDate}
+                                            </div>
+                                        </div>
                                     </div>
-                                    <span style={{
-                                        padding: '0.25rem 0.5rem',
-                                        borderRadius: 'var(--radius)',
-                                        fontSize: '0.75rem',
-                                        fontWeight: 600,
-                                        backgroundColor: q.status === 'Order Received' ? '#10b981' : 'var(--bg-secondary)',
-                                        color: q.status === 'Order Received' ? 'white' : 'var(--text-secondary)',
-                                        border: '1px solid var(--border-color)'
-                                    }}>
-                                        {q.status || 'Draft'}
-                                    </span>
-                                </div>
-
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                                    <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{q.customerName}</div>
-                                    <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-                                        {q.whatsapp || q.phone || 'No Contact'}
-                                    </div>
-                                </div>
-
-                                <div style={{ padding: '0.75rem', backgroundColor: 'var(--bg-secondary)', borderRadius: 'var(--radius)' }}>
-                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>{categoryName}</div>
-                                    <div style={{ fontWeight: 500, fontSize: '0.9rem' }}>{itemName}</div>
-                                    {moreCount > 0 && <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>+{moreCount} more items</div>}
-                                    {firstItem.notes && <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontStyle: 'italic', marginTop: '0.25rem' }}>"{firstItem.notes}"</div>}
-                                </div>
-
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.25rem' }}>
-                                    <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Total Amount</div>
-                                    <div style={{ fontSize: '1.125rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-                                        Rs. {(Number(q.totalPrice) || 0).toLocaleString()}
-                                    </div>
-                                </div>
-
-                                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
-                                    <button
-                                        onClick={() => setViewingDetails(q)}
-                                        style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.25rem', padding: '0.5rem', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-primary)', cursor: 'pointer' }}
-                                    >
-                                        <Eye size={16} /> View
-                                    </button>
-                                    <button
-                                        onClick={() => handleSendWhatsApp(q)}
-                                        style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.25rem', padding: '0.5rem', borderRadius: '6px', border: 'none', background: '#22c55e', color: 'white', cursor: 'pointer' }}
-                                    >
-                                        <MessageCircle size={16} /> WhatsApp
-                                    </button>
-                                    <button
-                                        onClick={() => { setViewingQuotation(q); setShowForm(true); }}
-                                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0.5rem', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-primary)', cursor: 'pointer' }}
-                                    >
-                                        <Edit size={16} />
-                                    </button>
-                                    {q.status !== 'Order Received' && (
-                                        <button
-                                            onClick={() => handleConvertToOrder(q)}
-                                            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0.5rem', borderRadius: '6px', border: '1px solid var(--border-color)', background: '#8b5cf6', color: 'white', cursor: 'pointer' }}
-                                            title="Convert to Order"
+                                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                                        <span
+                                            className="badge"
+                                            style={{
+                                                backgroundColor: q.status === 'Order Received' ? 'var(--success)' : 'var(--accent-primary)',
+                                                color: 'white',
+                                                fontSize: '0.7rem',
+                                                fontWeight: 600,
+                                                padding: '0.25rem 0.75rem',
+                                                borderRadius: '6px'
+                                            }}
                                         >
-                                            <Repeat size={16} />
+                                            {q.status || 'Draft'}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                {/* Customer & Item Info Section */}
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', padding: '0.75rem 0', borderTop: '1px solid var(--border-color)', borderBottom: '1px solid var(--border-color)' }}>
+                                    {/* Customer Info */}
+                                    <div>
+                                        <div style={{ fontWeight: 600, fontSize: '0.95rem', color: 'var(--text-primary)' }}>{q.customerName}</div>
+                                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>{q.whatsapp || q.phone || 'No Contact'}</div>
+                                    </div>
+
+                                    {/* Item Info */}
+                                    <div style={{ wordBreak: 'break-word', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+                                        {categoryName} - {itemName} (x{firstItem.quantity || 1})
+                                        {moreCount > 0 && <span style={{ color: 'var(--text-muted)', marginLeft: '0.5rem' }}>+{moreCount} more</span>}
+                                        {firstItem.notes && (
+                                            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontStyle: 'italic', marginTop: '4px' }}>
+                                                {firstItem.notes}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Pricing Info */}
+                                    <div style={{ fontWeight: 700, color: 'var(--accent-primary)', fontSize: '1.05rem' }}>
+                                        Rs. {totalPrice.toLocaleString()}
+                                    </div>
+                                </div>
+
+                                {/* Action Buttons Row */}
+                                <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', paddingTop: '0.5rem' }}>
+                                    <div className="action-buttons" style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'center' }}>
+                                        <button
+                                            onClick={() => handleSendWhatsApp(q)}
+                                            className="btn-icon"
+                                            disabled={isFreeUser}
+                                            style={{ background: 'none', color: isFreeUser ? '#888' : '#25D366', padding: 0, opacity: isFreeUser ? 0.6 : 1, cursor: isFreeUser ? 'not-allowed' : 'pointer' }}
+                                            title={isFreeUser ? 'WhatsApp is a Pro feature' : 'Send via WhatsApp'}
+                                        >
+                                            <MessageCircle size={22} />
+                                            {isFreeUser && <Crown size={10} color="#ef4444" style={{ position: 'absolute', top: -2, right: -2 }} />}
                                         </button>
-                                    )}
-                                    <button
-                                        onClick={() => handleDeleteQuotation(q.id)}
-                                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0.5rem', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'transparent', color: '#ef4444', cursor: 'pointer' }}
-                                    >
-                                        <Trash2 size={16} />
-                                    </button>
+                                        <button onClick={() => setViewingDetails(q)} className="btn-icon" style={{ background: 'none', color: 'var(--accent-primary)', padding: 0 }} title="View Quotation"><Eye size={22} /></button>
+                                        <button onClick={() => { setViewingQuotation(q); setShowForm(true); }} className="btn-icon" style={{ background: 'none', color: 'var(--text-secondary)', padding: 0 }} title="Edit Quotation"><Edit size={22} /></button>
+                                        {q.status !== 'Order Received' && (
+                                            <button onClick={() => handleConvertToOrder(q)} className="btn-icon" style={{ background: 'none', color: '#8b5cf6', padding: 0 }} title="Convert to Order"><Repeat size={22} /></button>
+                                        )}
+                                        <button onClick={() => handleDeleteQuotation(q.id)} className="btn-icon danger" style={{ background: 'none', color: 'var(--danger)', padding: 0 }} title="Delete Quotation"><Trash2 size={22} /></button>
+                                    </div>
                                 </div>
                             </div>
                         )
                     })
                 )}
             </div>
+
 
             {showForm && (
                 <QuotationForm
@@ -668,6 +775,8 @@ const QuotationManagement = ({ quotations, onUpdateQuotations, orders, onUpdateO
                 <ViewQuotationModal
                     quotation={viewingDetails}
                     onClose={() => setViewingDetails(null)}
+                    onSave={handleSaveQuotation}
+                    onConvertToOrder={handleConvertToOrder}
                 />
             )}
 
@@ -682,6 +791,25 @@ const QuotationManagement = ({ quotations, onUpdateQuotations, orders, onUpdateO
             />
         </div>
     )
+
+    if (isFreeUser) {
+        return (
+            <ProFeatureLock
+                featureName="Quotation Management"
+                showContent={false}
+                features={[
+                    "Professional Quotation Creation",
+                    "One-Click Convert to Order",
+                    "Quotation History & Tracking",
+                    "Share via WhatsApp & Email"
+                ]}
+            >
+                {content}
+            </ProFeatureLock>
+        )
+    }
+
+    return content
 }
 
 export default QuotationManagement

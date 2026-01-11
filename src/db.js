@@ -1,0 +1,34 @@
+
+import Dexie from 'dexie';
+
+export const db = new Dexie('aof_biz_db');
+
+db.version(6).stores({
+    // Main data
+    orders: 'id, createdDate, status, paymentStatus, customerName, orderSource',
+    products: 'id',
+    inventory: 'id, category, itemName',
+    expenses: 'id, date, category',
+    trackingNumbers: 'number, status',
+
+    // Settings & Meta
+    settings: 'id',
+    orderCounter: 'id',
+    orderSources: 'id, name', // Added name index
+
+    // File Storage (Images)
+    files: 'id, relatedId, type',
+
+    // Logs
+    inventoryLogs: '++id, inventoryItemId, date',
+    quotations: 'id, createdDate',
+
+    // Sync Queue (for offline sync)
+    syncQueue: 'id, tableName, action, createdAt'
+});
+
+
+export const resetDatabase = async () => {
+    await db.delete();
+    await db.open();
+}

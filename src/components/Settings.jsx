@@ -1,19 +1,36 @@
-import { useState, useEffect } from 'react'
-import { Settings as SettingsIcon, Save, AlertTriangle, Plus, Trash2, Edit2, Edit, Package, Search, ChevronDown, ChevronUp, Download, Upload, Trash, MessageCircle, X, LogOut, Database, Truck, RefreshCw, CheckCircle } from 'lucide-react'
+import React, { useState, useEffect } from 'react'
+import {
+  Settings as SettingsIcon, Save, AlertTriangle, Plus, Trash2, Edit2, Edit, Package, Search,
+  ChevronDown, ChevronUp, Download, Upload, Trash, MessageCircle, X, LogOut, Database,
+  Truck, RefreshCw, CheckCircle, Crown, Sparkles, Cloud, Building2, Users, Globe, Link, ShieldCheck, Database as DB,
+  Info, Eye, EyeOff, ChevronLeft, ChevronRight, CheckSquare
+} from 'lucide-react'
+import CustomDropdown from './Common/CustomDropdown'
+import Pagination from './Common/Pagination'
 import { loadGoogleScript, initTokenClient, uploadFileToDrive, listFilesFromDrive, downloadFileFromDrive } from '../utils/googleDrive'
 import { curfoxService } from '../utils/curfox'
 
 import { generateTrackingNumbersFromRange, getSettings, saveSettings, getOrders, getTrackingNumbers, saveTrackingNumbers, getProducts, getOrderCounter, saveOrderCounter, exportAllData, importAllData, clearAllData, importAllDataFromObject } from '../utils/storage'
+import { toTitleCase } from '../utils/textUtils'
 import ProductsManagement from './ProductsManagement'
 import ExpenseManagement from './ExpenseManagement'
 import InventoryManagement from './InventoryManagement'
+import { useLicensing } from './LicensingContext'
+import { useTheme, PALETTES } from './ThemeContext'
+import { Moon, Sun, Monitor, Shield, Zap, Lock, RefreshCw as RefreshIcon, TrendingUp, Check } from 'lucide-react'
 import DataHealthCheck from './DataHealthCheck'
 import OrderSourcesManagement from './OrderSourcesManagement'
 import ConfirmationModal from './ConfirmationModal'
 import { useToast } from './Toast/ToastContext'
+import ProFeatureLock, { ProFeatureBadge } from './ProFeatureLock'
+import CollapsibleSection from './Settings/CollapsibleSection'
+import CloudSyncSetup from './Settings/CloudSyncSetup'
+import UpdatesSection from './Settings/UpdatesSection'
 
-const Settings = ({ orders = [], expenses = [], inventory = [], onDataImported, onUpdateInventory, onLogout }) => {
+const Settings = ({ orders = [], expenses = [], inventory = [], onDataImported, onUpdateInventory, onLogout, updateManager }) => {
   const { addToast } = useToast()
+  const { userMode, setUserMode, resetSelection, isProUser, isFreeUser } = useLicensing()
+  const { theme, setTheme, fontFamily, setFontFamily, fontSize, setFontSize, effectiveTheme, paletteId, setPalette } = useTheme()
   const [activeTab, setActiveTab] = useState('general')
   const [settings, setSettings] = useState({})
   const [expandedSections, setExpandedSections] = useState({
@@ -24,7 +41,12 @@ const Settings = ({ orders = [], expenses = [], inventory = [], onDataImported, 
     googleDrive: false,
     whatsappTemplates: false,
     curfoxIntegration: false,
-    generalConfig: true,
+    generalConfig: false,
+    licensing: false,
+    appearance: false,
+    dangerZone: false,
+    deviceSync: false,
+    businessManagement: false,
   })
   const [products, setProducts] = useState({ categories: [] })
   const [trackingNumbers, setTrackingNumbers] = useState([])
@@ -98,119 +120,104 @@ const Settings = ({ orders = [], expenses = [], inventory = [], onDataImported, 
         getOrderCounter()
       ])
       setSettings(loadedSettings || {})
-      setProducts(productsData)
-      setTrackingNumbers(trackingNumbersData)
-      setOrderCounter(counter)
+      setProducts(productsData || { categories: [] })
+      setTrackingNumbers(trackingNumbersData || [])
+      setOrderCounter(counter ?? null)
     }
     loadData()
   }, [])
 
 
+
   return (
     <div>
-      <style>{`
-        @media (max-width: 600px) {
-          .settings-header {
-            flex-direction: column !important;
-            align-items: flex-start !important;
-            gap: 1rem !important;
-          }
-          .settings-header div {
-            width: 100%;
-          }
-          .settings-header .btn {
-            width: 100% !important;
-            justify-content: center !important;
-          }
-          .settings-tabs {
-            overflow-x: auto !important;
-            white-space: nowrap !important;
-            padding-bottom: 0.5rem !important;
-          }
-          .settings-tabs button {
-            padding: 0.75rem 1rem !important;
-            flex-shrink: 0 !important;
-          }
-        }
-      `}</style>
-
-      <div className="header-container settings-header" style={{ marginBottom: '2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div className="header-container settings-header flex-between mb-8">
         <div>
-          <h1 style={{
-            fontSize: '1.75rem',
-            fontWeight: 700,
-            color: 'var(--text-primary)',
-            marginBottom: '0.5rem',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.75rem'
-          }}>
-            <SettingsIcon size={28} />
+          <h1>
             Settings
           </h1>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
+          <p className="text-muted text-sm">
             Configure your application settings
           </p>
-        </div>
-        <div className="header-actions">
-          <button
-            onClick={onLogout}
-            className="btn btn-secondary"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              color: 'var(--text-muted)'
-            }}
-          >
-            <LogOut size={18} />
-            Logout
-          </button>
         </div>
       </div>
 
       {/* Tabs */}
-      <div className="settings-tabs" style={{
-        display: 'flex',
-        gap: '0.5rem',
-        marginBottom: '1.5rem',
-        borderBottom: '1px solid var(--border-color)',
-        flexWrap: 'nowrap',
-        overflowX: 'auto',
-        msOverflowStyle: 'none',
-        scrollbarWidth: 'none'
-      }}>
+      <div className="settings-tabs flex gap-sm mb-6" style={{ borderBottom: '1px solid var(--border-color)' }}>
         {[
-          { id: 'general', label: 'General' },
-          { id: 'backup', label: 'Backup & Data' },
-          { id: 'products', label: 'Products' },
-          { id: 'expenses', label: 'Expenses' },
-          { id: 'inventory', label: 'Inventory' },
+          { id: 'general', label: 'General', pro: false },
+          { id: 'backup', label: 'Backup & Data', pro: false },
+          { id: 'products', label: 'Products', pro: false },
+          { id: 'expenses', label: 'Expenses', pro: true },
+          { id: 'inventory', label: 'Inventory', pro: true },
+          { id: 'premium', label: 'Premium', pro: true },
+          { id: 'updates', label: 'Updates' },
         ].map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            style={{
-              padding: '0.75rem 1.5rem',
-              backgroundColor: 'transparent',
-              color: activeTab === tab.id ? 'var(--text-primary)' : 'var(--text-secondary)',
-              border: 'none',
-              borderBottom: activeTab === tab.id ? '2px solid var(--accent-primary)' : '2px solid transparent',
-              cursor: 'pointer',
-              fontSize: '0.875rem',
-              fontWeight: activeTab === tab.id ? 600 : 400,
-              transition: 'all 0.2s ease',
-              whiteSpace: 'nowrap'
-            }}
+            className={`settings-tab-btn ${activeTab === tab.id ? 'active' : ''}`}
           >
             {tab.label}
+            {tab.pro && isFreeUser && <ProFeatureBadge size={14} />}
           </button>
         ))}
       </div>
 
+
       {/* Tab Content */}
+
+      {activeTab === 'premium' && (
+        <div className="animate-fade-in">
+          <div style={{ marginBottom: '1rem' }}>
+            <h3 style={{ fontSize: '1.25rem', fontWeight: 800, margin: 0 }}>Premium Features</h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>Advanced capabilities for growing businesses</p>
+          </div>
+
+          <CollapsibleSection
+            title="Multi-Device Cloud Sync"
+            icon={Cloud}
+            isExpanded={expandedSections.deviceSync}
+            onToggle={() => toggleSection('deviceSync')}
+          >
+            <CloudSyncSetup />
+          </CollapsibleSection>
+
+          <CollapsibleSection
+            title="Multi-Business Management"
+            icon={Building2}
+            isExpanded={expandedSections.businessManagement}
+            onToggle={() => toggleSection('businessManagement')}
+          >
+            <div style={{ padding: '1rem' }}>
+              <div style={{
+                padding: '2rem',
+                backgroundColor: 'rgba(var(--accent-rgb), 0.03)',
+                borderRadius: 'var(--radius-lg)',
+                border: '1px dashed var(--border-color)',
+                textAlign: 'center'
+              }}>
+                <Users size={40} color="var(--accent-primary)" style={{ marginBottom: '1rem', opacity: 0.6 }} />
+                <h4 style={{ margin: '0 0 0.5rem 0' }}>Manage Multiple Entities</h4>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', maxWidth: '450px', margin: '0 auto 1.5rem' }}>
+                  Switch between different businesses, inventories, and accounting books with a single click.
+                </p>
+                <div className="badge badge-info" style={{ padding: '0.5rem 1rem' }}>In Development</div>
+              </div>
+            </div>
+          </CollapsibleSection>
+        </div>
+      )}
+
+      {activeTab === 'updates' && (
+        <UpdatesSection updateManager={updateManager} />
+      )}
+
       {activeTab === 'general' && (
         <>
+          {/* Appearance Section */}
+
+
           <CollapsibleSection
             title="General Configuration"
             icon={SettingsIcon}
@@ -222,123 +229,426 @@ const Settings = ({ orders = [], expenses = [], inventory = [], onDataImported, 
               setSettings={setSettings}
               showToast={addToast}
             />
+
           </CollapsibleSection>
 
+          <div id="appearance-section">
+            <CollapsibleSection
+              title={<>Appearance {isFreeUser && <ProFeatureBadge size={16} />}</>}
+              icon={Sun}
+              isExpanded={expandedSections.appearance}
+              onToggle={() => toggleSection('appearance')}
+            >
+              <ProFeatureLock featureName="Appearance Customization" showContent={true}>
+                <>
+                  <div style={{ marginBottom: '2rem' }}>
+                    <p style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <Monitor size={16} /> Theme Mode
+                    </p>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '1rem' }}>
+                      {[
+                        { id: 'light', label: 'Light', icon: Sun },
+                        { id: 'dark', label: 'Dark', icon: Moon },
+                        { id: 'system', label: 'System', icon: Monitor }
+                      ].map((t) => {
+                        const Icon = t.icon
+                        const isActive = theme === t.id
+                        return (
+                          <button
+                            key={t.id}
+                            onClick={() => setTheme(t.id)}
+                            style={{
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: 'center',
+                              gap: '0.75rem',
+                              padding: '1.25rem',
+                              borderRadius: '12px',
+                              border: isActive ? '2px solid var(--accent-primary)' : '1px solid var(--border-color)',
+                              backgroundColor: isActive ? 'rgba(255, 46, 54, 0.05)' : 'rgba(255, 255, 255, 0.02)',
+                              cursor: 'pointer',
+                              transition: 'all 0.2s ease',
+                              color: isActive ? 'var(--text-primary)' : 'var(--text-muted)'
+                            }}
+                          >
+                            <Icon size={24} color={isActive ? 'var(--accent-primary)' : 'var(--text-muted)'} />
+                            <span style={{ fontSize: '0.875rem', fontWeight: isActive ? 600 : 400 }}>
+                              {t.label}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  <div>
+                    <p style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <Edit size={16} /> Font Personality
+                    </p>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '1rem' }}>
+                      {[
+                        { id: 'modern', label: 'Modern', description: 'Clean & Tech-focused', font: "'Inter', sans-serif" },
+                        { id: 'professional', label: 'Professional', description: 'Balanced & Friendly', font: "'Poppins', sans-serif" },
+                        { id: 'elegant', label: 'Elegant', description: 'Sophisticated & Classic', font: "'Playfair Display', serif" },
+                        { id: 'system', label: 'System', description: 'Native OS Feel', font: 'system-ui' }
+                      ].map((f) => {
+                        const isActive = fontFamily === f.id
+                        return (
+                          <button
+                            key={f.id}
+                            onClick={() => setFontFamily(f.id)}
+                            style={{
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: 'flex-start',
+                              gap: '0.4rem',
+                              padding: '1.25rem',
+                              borderRadius: '12px',
+                              border: isActive ? '2px solid var(--accent-primary)' : '1px solid var(--border-color)',
+                              backgroundColor: isActive ? 'rgba(255, 46, 54, 0.05)' : 'rgba(255, 255, 255, 0.02)',
+                              cursor: 'pointer',
+                              transition: 'all 0.2s ease',
+                              textAlign: 'left',
+                              width: '100%'
+                            }}
+                          >
+                            <span style={{
+                              fontSize: '1.125rem',
+                              fontWeight: 700,
+                              color: isActive ? 'var(--text-primary)' : 'var(--text-muted)',
+                              fontFamily: f.font
+                            }}>
+                              {f.label}
+                            </span>
+                            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 400 }}>
+                              {f.description}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: '2rem' }}>
+                    <p style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <TrendingUp size={16} /> Font Size Scale
+                    </p>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem' }}>
+                      {[
+                        { id: 'small', label: 'Small', percentage: '88%' },
+                        { id: 'normal', label: 'Normal', percentage: '100%' },
+                        { id: 'large', label: 'Large', percentage: '112%' }
+                      ].map((s) => {
+                        const isActive = fontSize === s.id
+                        return (
+                          <button
+                            key={s.id}
+                            onClick={() => setFontSize(s.id)}
+                            style={{
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: 'center',
+                              gap: '0.25rem',
+                              padding: '0.75rem',
+                              borderRadius: '12px',
+                              border: isActive ? '2px solid var(--accent-primary)' : '1px solid var(--border-color)',
+                              backgroundColor: isActive ? 'rgba(255, 46, 54, 0.05)' : 'rgba(255, 255, 255, 0.02)',
+                              cursor: 'pointer',
+                              transition: 'all 0.2s ease',
+                              color: isActive ? 'var(--text-primary)' : 'var(--text-muted)'
+                            }}
+                          >
+                            <span style={{ fontSize: '0.875rem', fontWeight: isActive ? 600 : 400 }}>{s.label}</span>
+                            <span style={{ fontSize: '0.7rem', opacity: 0.6 }}>{s.percentage}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Color Palette Section */}
+                  <div style={{ marginTop: '2.5rem', borderTop: '1px solid var(--border-color)', paddingTop: '2rem' }}>
+                    <p style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <Zap size={16} /> Design Personality (Color Palette)
+                    </p>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
+                      {Object.values(PALETTES).map((p) => {
+                        const isActive = paletteId === p.id
+                        return (
+                          <button
+                            key={p.id}
+                            onClick={() => setPalette(p.id)}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '1rem',
+                              padding: '1rem',
+                              borderRadius: '12px',
+                              border: isActive ? `2px solid ${p.color}` : '1px solid var(--border-color)',
+                              backgroundColor: isActive
+                                ? `rgba(${parseInt(p.color.slice(1, 3), 16)}, ${parseInt(p.color.slice(3, 5), 16)}, ${parseInt(p.color.slice(5, 7), 16)}, 0.15)`
+                                : 'rgba(255, 255, 255, 0.02)',
+                              cursor: 'pointer',
+                              transition: 'all 0.2s ease',
+                              textAlign: 'left'
+                            }}
+                          >
+                            <div style={{
+                              width: '32px',
+                              height: '32px',
+                              borderRadius: '8px',
+                              backgroundColor: p.color,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              color: '#fff',
+                              boxShadow: isActive
+                                ? `0 4px 12px rgba(${parseInt(p.color.slice(1, 3), 16)}, ${parseInt(p.color.slice(3, 5), 16)}, ${parseInt(p.color.slice(5, 7), 16)}, 0.4)`
+                                : '0 4px 10px rgba(0,0,0,0.1)'
+                            }}>
+                              {isActive && <Check size={18} />}
+                            </div>
+                            <div>
+                              <div style={{ fontSize: '0.875rem', fontWeight: 600, color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
+                                {p.name}
+                              </div>
+                              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                                {p.id.charAt(0).toUpperCase() + p.id.slice(1)} accents
+                              </div>
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '2rem' }}>
+                      <button
+                        onClick={() => {
+                          showConfirm(
+                            'Reset Appearance',
+                            'Are you sure you want to reset your appearance settings to defaults?',
+                            () => {
+                              setPalette('signature')
+                              setTheme('system')
+                              setFontFamily('modern')
+                              setFontSize('normal')
+                              addToast('Appearance settings reset', 'info')
+                            }
+                          )
+                        }}
+                        className="btn btn-secondary"
+                        style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.6rem 1rem', fontSize: '0.85rem' }}
+                      >
+                        <RefreshIcon size={16} />
+                        Reset to Defaults
+                      </button>
+                    </div>
+                  </div>
+                </>
+              </ProFeatureLock>
+            </CollapsibleSection>
+          </div>
+
           <CollapsibleSection
-            title="Tracking Numbers"
+            title={<>Tracking Numbers {isFreeUser && <ProFeatureBadge size={16} />}</>}
             icon={Package}
             isExpanded={expandedSections.trackingNumbers}
             onToggle={() => toggleSection('trackingNumbers')}
           >
-            <TrackingNumberManagement
-              trackingNumbers={trackingNumbers}
-              setTrackingNumbers={setTrackingNumbers}
-              showAlert={showAlert}
-              showConfirm={showConfirm}
-              showToast={addToast} // Pass showToast
-            />
+            <ProFeatureLock featureName="Tracking Numbers" showContent={true}>
+              <TrackingNumberManagement
+                trackingNumbers={trackingNumbers}
+                setTrackingNumbers={setTrackingNumbers}
+                showAlert={showAlert}
+                showConfirm={showConfirm}
+                showToast={addToast} // Pass showToast
+              />
+            </ProFeatureLock>
           </CollapsibleSection>
           {/* Curfox Integration Section */}
           <CollapsibleSection
-            title="Curfox Courier Integration"
+            title={<>Curfox Courier Integration {isFreeUser && <ProFeatureBadge size={16} />}</>}
             icon={Truck}
             isExpanded={expandedSections.curfoxIntegration}
             onToggle={() => toggleSection('curfoxIntegration')}
           >
-            <CurfoxSettings
-              settings={settings}
-              setSettings={setSettings}
-              showToast={addToast}
-            />
+            <ProFeatureLock featureName="Curfox Integration" showContent={true}>
+              <CurfoxSettings
+                settings={settings}
+                setSettings={setSettings}
+                showToast={addToast}
+              />
+            </ProFeatureLock>
           </CollapsibleSection>
 
           {/* WhatsApp Templates Section */}
           <CollapsibleSection
-            title="WhatsApp Message Templates"
+            title={<>WhatsApp Message Templates {isFreeUser && <ProFeatureBadge size={16} />}</>}
             icon={MessageCircle}
             isExpanded={expandedSections.whatsappTemplates}
             onToggle={() => toggleSection('whatsappTemplates')}
           >
-            <WhatsAppTemplates
-              settings={settings}
-              setSettings={setSettings}
-              showAlert={showAlert}
-              showConfirm={showConfirm}
-              showToast={addToast}
-            />
+            <ProFeatureLock featureName="WhatsApp Templates" showContent={true}>
+              <WhatsAppTemplates
+                settings={settings}
+                setSettings={setSettings}
+                showAlert={showAlert}
+                showConfirm={showConfirm}
+                showToast={addToast}
+              />
+            </ProFeatureLock>
           </CollapsibleSection>
 
           {/* Order Sources Section */}
           <CollapsibleSection
-            title="Order Sources"
+            title={<>Order Sources {isFreeUser && <ProFeatureBadge size={16} />}</>}
             icon={Package}
             isExpanded={expandedSections.orderSources}
             onToggle={() => toggleSection('orderSources')}
           >
-            <OrderSourcesManagement />
+            <ProFeatureLock featureName="Order Sources Management" showContent={true}>
+              <OrderSourcesManagement />
+            </ProFeatureLock>
           </CollapsibleSection>
+
+
         </>
       )}
 
       {/* Backup & Data Tab Content */}
-      {activeTab === 'backup' && (
-        <>
-          {/* Google Drive Backup Section */}
-          <CollapsibleSection
-            title="Google Drive Cloud Backup & Restore"
-            icon={Database}
-            isExpanded={expandedSections.googleDrive}
-            onToggle={() => toggleSection('googleDrive')}
-          >
-            <GoogleDriveBackup
-              settings={settings}
-              setSettings={setSettings}
-              orders={orders}
-              expenses={expenses}
-              inventory={inventory}
-              products={products}
-              trackingNumbers={trackingNumbers}
-              orderCounter={orderCounter}
-              showToast={addToast}
-              showConfirm={showConfirm}
-              onDataImported={onDataImported}
-            />
-          </CollapsibleSection>
+      {
+        activeTab === 'backup' && (
+          <>
+            {/* Google Drive Backup Section */}
+            <CollapsibleSection
+              title={<>Google Drive Cloud Backup & Restore {isFreeUser && <ProFeatureBadge size={16} />}</>}
+              icon={Database}
+              isExpanded={expandedSections.googleDrive}
+              onToggle={() => toggleSection('googleDrive')}
+            >
+              <ProFeatureLock featureName="Cloud Backup" showContent={true}>
+                <GoogleDriveBackup
+                  settings={settings}
+                  setSettings={setSettings}
+                  orders={orders}
+                  expenses={expenses}
+                  inventory={inventory}
+                  products={products}
+                  trackingNumbers={trackingNumbers}
+                  orderCounter={orderCounter}
+                  showToast={addToast}
+                  showConfirm={showConfirm}
+                  onDataImported={onDataImported}
+                />
+              </ProFeatureLock>
+            </CollapsibleSection>
 
-          {/* Data Management Section (includes Health Check) */}
-          <CollapsibleSection
-            title="Manual Backup & Restore"
-            icon={Package}
-            isExpanded={expandedSections.dataManagement}
-            onToggle={() => toggleSection('dataManagement')}
-          >
-            <DataManagement
-              orders={orders}
-              expenses={expenses}
-              inventory={inventory}
-              products={products}
-              settings={settings}
-              trackingNumbers={trackingNumbers}
-              orderCounter={orderCounter}
-              onDataImported={onDataImported}
-              showAlert={showAlert}
-              showConfirm={showConfirm}
-              showToast={addToast}
-            />
+            {/* Data Management Section (includes Health Check) */}
+            <CollapsibleSection
+              title="Manual Backup & Restore"
+              icon={Package}
+              isExpanded={expandedSections.dataManagement}
+              onToggle={() => toggleSection('dataManagement')}
+            >
+              <DataManagement
+                orders={orders}
+                expenses={expenses}
+                inventory={inventory}
+                products={products}
+                settings={settings}
+                trackingNumbers={trackingNumbers}
+                orderCounter={orderCounter}
+                onDataImported={onDataImported}
+                showAlert={showAlert}
+                showConfirm={showConfirm}
+                showToast={addToast}
+              />
 
-          </CollapsibleSection>
+            </CollapsibleSection>
 
-          {/* Data Health Check Section */}
-          <CollapsibleSection
-            title="Data Health Check"
-            icon={AlertTriangle}
-            isExpanded={expandedSections.dataHealth}
-            onToggle={() => toggleSection('dataHealth')}
-          >
-            <DataHealthCheck orders={orders} expenses={expenses} inventory={inventory} />
-          </CollapsibleSection>
-        </>
-      )}
+            {/* Data Health Check Section */}
+            <CollapsibleSection
+              title="Data Health Check"
+              icon={AlertTriangle}
+              isExpanded={expandedSections.dataHealth}
+              onToggle={() => toggleSection('dataHealth')}
+            >
+              <DataHealthCheck orders={orders} expenses={expenses} inventory={inventory} />
+            </CollapsibleSection>
+
+            {/* Danger Zone Section */}
+            <CollapsibleSection
+              title="Danger Zone"
+              icon={Trash}
+              isExpanded={expandedSections.dangerZone}
+              onToggle={() => toggleSection('dangerZone')}
+              danger={true}
+            >
+              <div style={{ padding: '1rem' }}>
+                <div style={{
+                  backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                  borderRadius: '8px',
+                  padding: '1.5rem'
+                }}>
+                  <h4 style={{
+                    color: 'var(--danger)',
+                    marginBottom: '0.75rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    fontSize: '1rem',
+                    fontWeight: 600
+                  }}>
+                    <AlertTriangle size={18} />
+                    Clear All Application Data
+                  </h4>
+                  <p style={{
+                    color: 'var(--text-secondary)',
+                    fontSize: '0.875rem',
+                    marginBottom: '1rem',
+                    lineHeight: '1.5'
+                  }}>
+                    This action will permanently delete ALL data including orders, expenses, inventory, and settings.
+                    This cannot be undone. Please make sure you have a backup before proceeding.
+                  </p>
+                  <div style={{ display: 'flex', gap: '1rem' }}>
+                    <button
+                      onClick={() => {
+                        showConfirm(
+                          'Delete All Data',
+                          'Are you absolutely sure you want to delete ALL data? This action cannot be undone.',
+                          () => {
+                            clearAllData()
+                            addToast('All data cleared successfully', 'success')
+                            setTimeout(() => {
+                              window.location.reload()
+                            }, 1500)
+                          },
+                          'danger',
+                          'Yes, Delete Everything'
+                        )
+                      }}
+                      className="btn btn-danger"
+                      style={{
+                        padding: '0.75rem 1.5rem',
+                        fontWeight: 600,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem'
+                      }}
+                    >
+                      <Trash size={16} />
+                      Clear All Data
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </CollapsibleSection>
+          </>
+        )
+      }
 
       {/* Products Tab Content */}
       {
@@ -350,14 +660,18 @@ const Settings = ({ orders = [], expenses = [], inventory = [], onDataImported, 
       {/* Expenses Tab Content */}
       {
         activeTab === 'expenses' && (
-          <ExpenseManagement />
+          <ProFeatureLock featureName="Expenses Settings">
+            <ExpenseManagement />
+          </ProFeatureLock>
         )
       }
 
       {/* Inventory Tab Content */}
       {
         activeTab === 'inventory' && (
-          <InventoryManagement inventory={inventory} onUpdateInventory={onUpdateInventory} />
+          <ProFeatureLock featureName="Inventory Settings">
+            <InventoryManagement inventory={inventory} onUpdateInventory={onUpdateInventory} />
+          </ProFeatureLock>
         )
       }
 
@@ -376,61 +690,16 @@ const Settings = ({ orders = [], expenses = [], inventory = [], onDataImported, 
   )
 }
 
-// Collapsible Section Component (Reusable for future sections)
-// Pattern for adding new collapsible sections:
-// 1. Add section name to expandedSections state: { sectionName: true }
-// 2. Wrap content in <CollapsibleSection> component
-// 3. Pass: title, icon (optional), isExpanded={expandedSections.sectionName}, onToggle={() => toggleSection('sectionName')}
-const CollapsibleSection = ({ title, icon: Icon, isExpanded, onToggle, children }) => {
-  return (
-    <div className="card" style={{ marginBottom: '1.5rem' }}>
-      <button
-        onClick={onToggle}
-        style={{
-          width: '100%',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          backgroundColor: 'transparent',
-          border: 'none',
-          padding: 0,
-          cursor: 'pointer',
-          marginBottom: isExpanded ? '1.5rem' : 0
-        }}
-      >
-        <h2 style={{
-          fontSize: '1.25rem',
-          fontWeight: 600,
-          color: 'var(--text-primary)',
-          margin: 0,
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.5rem'
-        }}>
-          {Icon && <Icon size={20} />}
-          {title}
-        </h2>
-        {isExpanded ? (
-          <ChevronUp size={20} color="var(--text-secondary)" />
-        ) : (
-          <ChevronDown size={20} color="var(--text-secondary)" />
-        )}
-      </button>
-
-      {isExpanded && (
-        <div style={{ animation: 'fadeIn 0.2s ease' }}>
-          {children}
-        </div>
-      )}
-    </div>
-  )
-}
+// CollapsibleSection is now imported from './Settings/CollapsibleSection'
 
 // Tracking Number Management Component
 // Tracking Number Management Component
 const TrackingNumberManagement = ({ trackingNumbers, setTrackingNumbers, showAlert, showConfirm, showToast }) => {
-  const [showBulkAdd, setShowBulkAdd] = useState(false)
-  const [showBulkDeleteRange, setShowBulkDeleteRange] = useState(false)
+  const [showManageRanges, setShowManageRanges] = useState(false)
+  const [manageTab, setManageTab] = useState('add') // 'add' | 'delete' | 'status'
+  const [statusRangeStart, setStatusRangeStart] = useState('')
+  const [statusRangeEnd, setStatusRangeEnd] = useState('')
+  const [bulkStatusValue, setBulkStatusValue] = useState('available')
   const [rangeStart, setRangeStart] = useState('')
   const [rangeEnd, setRangeEnd] = useState('')
   const [deleteRangeStart, setDeleteRangeStart] = useState('')
@@ -440,6 +709,13 @@ const TrackingNumberManagement = ({ trackingNumbers, setTrackingNumbers, showAle
   const [filterStatus, setFilterStatus] = useState('all') // all, available, used
   const [editingNumber, setEditingNumber] = useState(null) // { id, number }
   const [editValue, setEditValue] = useState('')
+  const [currentPage, setCurrentPage] = useState(1)
+  const [itemsPerPage, setItemsPerPage] = useState(20)
+
+  // Reset pagination when filters change
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [searchTerm, filterStatus])
 
   // trackingNumbers and setTrackingNumbers are passed as props
 
@@ -468,7 +744,7 @@ const TrackingNumberManagement = ({ trackingNumbers, setTrackingNumbers, showAle
     setTrackingNumbers(updated)
     setRangeStart('')
     setRangeEnd('')
-    setShowBulkAdd(false)
+    setShowManageRanges(false)
     showToast(`Added ${toAdd.length} tracking numbers`, 'success')
   }
 
@@ -524,6 +800,27 @@ const TrackingNumberManagement = ({ trackingNumbers, setTrackingNumbers, showAle
     setEditValue('')
   }
 
+  const handleBulkStatusUpdate = () => {
+    if (selectedNumbers.size === 0) {
+      showToast('Please select tracking numbers to update', 'warning')
+      return
+    }
+
+    const statusLabel = bulkStatusValue === 'available' ? 'Available' : 'Used'
+
+    showConfirm('Update Status', `Update status to "${statusLabel}" for ${selectedNumbers.size} tracking number(s)?`, async () => {
+      const updated = trackingNumbers.map(tn =>
+        selectedNumbers.has(tn.number) ? { ...tn, status: bulkStatusValue } : tn
+      )
+      await saveTrackingNumbers(updated)
+      setTrackingNumbers(updated)
+      setSelectedNumbers(new Set())
+      setBulkStatusValue('available')
+      setShowManageRanges(false)
+      showToast(`Updated ${selectedNumbers.size} tracking number(s) to ${statusLabel}`, 'success')
+    }, 'warning', 'Update')
+  }
+
   const handleBulkDeleteByRange = () => {
     if (!deleteRangeStart || !deleteRangeEnd) {
       showToast('Please enter both start and end tracking numbers', 'warning')
@@ -550,7 +847,7 @@ const TrackingNumberManagement = ({ trackingNumbers, setTrackingNumbers, showAle
       setTrackingNumbers(updated)
       setDeleteRangeStart('')
       setDeleteRangeEnd('')
-      setShowBulkDeleteRange(false)
+      setShowManageRanges(false)
       showToast(`Deleted ${toDelete.length} tracking number(s)`, 'success')
     }, 'danger', 'Delete')
   }
@@ -619,287 +916,365 @@ const TrackingNumberManagement = ({ trackingNumbers, setTrackingNumbers, showAle
   const availableCount = trackingNumbers.filter(tn => tn.status === 'available').length
   const usedCount = trackingNumbers.filter(tn => tn.status === 'used').length
 
+  // Pagination Logic
+  const totalPages = Math.ceil(filteredNumbers.length / itemsPerPage)
+  const indexOfLastItem = currentPage * itemsPerPage
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage
+  const currentItems = filteredNumbers.slice(indexOfFirstItem, indexOfLastItem)
+
+  const handlePageChange = (page) => {
+    if (page >= 1 && page <= totalPages) {
+      setCurrentPage(page)
+    }
+  }
+
   return (
-    <div>
+    <div className="animate-fade-in">
       <style>{`
+        .tn-table-desktop { display: block; }
+        .tn-mobile-list { display: none; }
         @media (max-width: 600px) {
-          .tn-actions {
-            flex-direction: column !important;
-            gap: 0.75rem !important;
-          }
-          .tn-actions .btn {
-            width: 100% !important;
-            justify-content: center !important;
-          }
-          .tn-range-form {
-            flex-direction: column !important;
-            align-items: stretch !important;
-            gap: 1rem !important;
-          }
-          .tn-range-form .form-group {
-            width: 100% !important;
-          }
-          .tn-range-form .btn {
-            width: 100% !important;
-            justify-content: center !important;
-          }
-          .tn-stats {
-            grid-template-columns: 1fr !important;
-          }
-        }
-        
-        @media (max-width: 480px) {
-          .tn-table-desktop {
-            display: none !important;
-          }
-          .tn-mobile-list {
-            display: block !important;
-          }
-          .tn-mobile-card {
-            background: var(--bg-secondary);
-            padding: 1rem;
-            border-radius: var(--radius);
-            margin-bottom: 1rem;
-            border: 1px solid var(--border-color);
-          }
-          .tn-mobile-card-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 0.75rem;
-          }
-        }
-        
-        @media (min-width: 481px) {
-          .tn-mobile-list {
-            display: none !important;
-          }
+          .tn-table-desktop { display: none !important; }
+          .tn-mobile-list { display: flex !important; }
         }
       `}</style>
-      <div className="tn-actions" style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '0.5rem', marginBottom: '1.5rem' }}>
-        <button
-          onClick={() => setShowBulkAdd(!showBulkAdd)}
-          className="btn btn-primary"
-          style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
-        >
-          <Plus size={18} />
-          Bulk Add
-        </button>
-        <button
-          onClick={() => setShowBulkDeleteRange(!showBulkDeleteRange)}
-          className="btn btn-secondary"
-          style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
-        >
-          <Trash2 size={18} />
-          Delete Range
-        </button>
-        <button
-          onClick={handleBulkDeleteByStatus}
-          className="btn btn-danger"
-          style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
-        >
-          <Trash2 size={18} />
-          Delete Status
-        </button>
-      </div>
-
-      {/* Bulk Add Form */}
-      {showBulkAdd && (
-        <div className="card" style={{
-          padding: '1.25rem',
-          backgroundColor: 'var(--bg-secondary)',
-          marginBottom: '1.5rem',
-          border: '1px solid var(--border-color)'
-        }}>
-          <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '0.5rem', color: 'var(--text-primary)' }}>
-            Add Tracking Numbers by Range
-          </h3>
-          <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginBottom: '1.25rem' }}>
-            Enter range like: <span style={{ color: 'var(--accent-primary)', fontWeight: 500 }}>RM02818735 – RM02818900</span>
-          </p>
-          <div className="tn-range-form" style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end' }}>
-            <div className="form-group" style={{ flex: 1 }}>
-              <label className="form-label">Start Number</label>
-              <input
-                type="text"
-                value={rangeStart}
-                onChange={(e) => setRangeStart(e.target.value)}
-                placeholder="RM02818735"
-                className="form-input"
-              />
-            </div>
-            <div className="hidden-mobile" style={{ paddingBottom: '0.75rem', color: 'var(--text-muted)' }}>–</div>
-            <div className="form-group" style={{ flex: 1 }}>
-              <label className="form-label">End Number</label>
-              <input
-                type="text"
-                value={rangeEnd}
-                onChange={(e) => setRangeEnd(e.target.value)}
-                placeholder="RM02818900"
-                className="form-input"
-              />
-            </div>
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
-              <button onClick={handleBulkAdd} className="btn btn-primary" style={{ flex: 1 }}>
-                Add Range
-              </button>
-              <button onClick={() => setShowBulkAdd(false)} className="btn btn-secondary" style={{ flex: 1 }}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Bulk Delete by Range Form */}
-      {showBulkDeleteRange && (
-        <div className="card" style={{
-          padding: '1.25rem',
-          backgroundColor: 'rgba(239, 68, 68, 0.05)',
-          marginBottom: '1.5rem',
-          border: '1px solid var(--danger)'
-        }}>
-          <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '0.5rem', color: 'var(--danger)' }}>
-            Delete Tracking Numbers by Range
-          </h3>
-          <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginBottom: '1.25rem' }}>
-            Enter range like: <span style={{ color: 'var(--danger)', fontWeight: 500 }}>RM02818735 – RM02818900</span>
-          </p>
-          <div className="tn-range-form" style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end' }}>
-            <div className="form-group" style={{ flex: 1 }}>
-              <label className="form-label">Start Number</label>
-              <input
-                type="text"
-                value={deleteRangeStart}
-                onChange={(e) => setDeleteRangeStart(e.target.value)}
-                placeholder="RM02818735"
-                className="form-input"
-              />
-            </div>
-            <div className="hidden-mobile" style={{ paddingBottom: '0.75rem', color: 'var(--text-muted)' }}>–</div>
-            <div className="form-group" style={{ flex: 1 }}>
-              <label className="form-label">End Number</label>
-              <input
-                type="text"
-                value={deleteRangeEnd}
-                onChange={(e) => setDeleteRangeEnd(e.target.value)}
-                placeholder="RM02818900"
-                className="form-input"
-              />
-            </div>
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
-              <button onClick={handleBulkDeleteByRange} className="btn btn-danger" style={{ flex: 1 }}>
-                Delete Range
-              </button>
-              <button onClick={() => setShowBulkDeleteRange(false)} className="btn btn-secondary" style={{ flex: 1 }}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Summary Stats */}
-      <div className="tn-stats" style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(3, 1fr)',
-        gap: '1rem',
-        marginBottom: '1.5rem'
-      }}>
-        <div style={{
-          padding: '1rem',
-          backgroundColor: 'var(--bg-secondary)',
-          borderRadius: 'var(--radius)',
-          border: '1px solid var(--border-color)'
-        }}>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.25rem', fontWeight: 600, textTransform: 'uppercase' }}>Total</div>
-          <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--text-primary)' }}>{trackingNumbers.length}</div>
-        </div>
-        <div style={{
-          padding: '1rem',
-          backgroundColor: 'rgba(16, 185, 129, 0.1)',
-          borderRadius: 'var(--radius)',
-          border: '1px solid var(--success)'
-        }}>
-          <div style={{ fontSize: '0.75rem', color: 'var(--success)', marginBottom: '0.25rem', fontWeight: 600, textTransform: 'uppercase' }}>Available</div>
-          <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--success)' }}>{availableCount}</div>
-        </div>
-        <div style={{
-          padding: '1rem',
-          backgroundColor: 'rgba(239, 68, 68, 0.1)',
-          borderRadius: 'var(--radius)',
-          border: '1px solid var(--danger)'
-        }}>
-          <div style={{ fontSize: '0.75rem', color: 'var(--danger)', marginBottom: '0.25rem', fontWeight: 600, textTransform: 'uppercase' }}>Used</div>
-          <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--danger)' }}>{usedCount}</div>
-        </div>
-      </div>
-
-      {/* Filters and Actions */}
+      {/* 1. Statistics Cards */}
       <div style={{
-        display: 'flex',
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
         gap: '1rem',
-        marginBottom: '1.5rem',
-        flexWrap: 'wrap',
-        alignItems: 'center'
+        marginBottom: '2rem'
       }}>
-        <div style={{ position: 'relative', flex: 1, minWidth: '200px' }}>
-          <Search size={18} style={{
-            position: 'absolute',
-            left: '0.75rem',
-            top: '50%',
-            transform: 'translateY(-50%)',
-            color: 'var(--text-muted)'
-          }} />
-          <input
-            type="text"
-            placeholder="Search tracking numbers..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            style={{
-              width: '100%',
-              paddingLeft: '2.5rem'
-            }}
-          />
+        <div style={{
+          padding: '1.25rem',
+          backgroundColor: 'var(--bg-secondary)',
+          borderRadius: '16px',
+          border: '1px solid var(--border-color)',
+          display: 'flex', flexDirection: 'column', gap: '0.25rem'
+        }}>
+          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Total Numbers</span>
+          <span style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--text-primary)' }}>{trackingNumbers.length}</span>
         </div>
-        <select
-          value={filterStatus}
-          onChange={(e) => setFilterStatus(e.target.value)}
-          style={{ minWidth: '150px' }}
-        >
-          <option value="all">All Status</option>
-          <option value="available">Available</option>
-          <option value="used">Used</option>
-        </select>
-        {selectedNumbers.size > 0 && (
-          <button
-            onClick={handleBulkDelete}
-            className="btn btn-danger"
-            style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
-          >
-            <Trash2 size={16} />
-            Delete Selected ({selectedNumbers.size})
-          </button>
-        )}
+        <div style={{
+          padding: '1.25rem',
+          backgroundColor: 'rgba(16, 185, 129, 0.1)',
+          borderRadius: '16px',
+          border: '1px solid rgba(16, 185, 129, 0.2)',
+          display: 'flex', flexDirection: 'column', gap: '0.25rem'
+        }}>
+          <span style={{ fontSize: '0.75rem', color: 'var(--success)', fontWeight: 600, textTransform: 'uppercase' }}>Available</span>
+          <span style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--success)' }}>{availableCount}</span>
+        </div>
+        <div style={{
+          padding: '1.25rem',
+          backgroundColor: 'rgba(239, 68, 68, 0.1)',
+          borderRadius: '16px',
+          border: '1px solid rgba(239, 68, 68, 0.2)',
+          display: 'flex', flexDirection: 'column', gap: '0.25rem'
+        }}>
+          <span style={{ fontSize: '0.75rem', color: 'var(--danger)', fontWeight: 600, textTransform: 'uppercase' }}>Used</span>
+          <span style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--danger)' }}>{usedCount}</span>
+        </div>
       </div>
 
-      {/* Tracking Numbers Table */}
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+      {/* 2. Unified Toolbar */}
+      {/* 2. Unified Toolbar */}
+      <style>{`
+        .toolbar-container {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 1rem;
+          margin-bottom: 1.5rem;
+          align-items: center;
+          padding: 0.75rem;
+          background-color: transparent;
+          border-radius: 16px;
+          border: 1px solid var(--border-color);
+        }
+        .toolbar-controls {
+          flex: 1;
+          display: flex;
+          gap: 0.75rem;
+          flex-wrap: wrap;
+          justify-content: flex-end;
+          align-items: center;
+        }
+        .toolbar-search {
+          position: relative;
+          min-width: 200px;
+          flex: 1 1 auto;
+          max-width: 300px;
+        }
+        .toolbar-filter-wrapper {
+          flex: 0 0 auto;
+        }
+        
+        @media (max-width: 768px) {
+          .toolbar-container {
+            flex-direction: column;
+            align-items: stretch;
+            gap: 0.75rem;
+          }
+          .toolbar-btn-manage {
+            width: 100%;
+            justify-content: center;
+          }
+           /* On mobile, let the controls stack nicely */
+          .toolbar-controls {
+            width: 100%;
+            flex-direction: row; /* Keep row but ensure wrapping */
+            justify-content: space-between;
+          }
+          .toolbar-search {
+            max-width: none;
+            width: 100%;
+            flex: 1 1 100%; /* Force full width */
+            order: 1; /* Search first on mobile controls */
+          }
+          .toolbar-filter-wrapper {
+            flex: 1 1 calc(50% - 0.5rem); /* Half width minus gap */
+            order: 2;
+          }
+          .toolbar-div-delete {
+             flex: 1 1 calc(50% - 0.5rem);
+             order: 3;
+          }
+          /* If only filter exists (no delete), allow filter to stretch or stay auto? 
+             Let's make filter full width if it's the only item besides search, 
+             but here we set flex-grow so it should fill available space.
+          */
+        }
+      `}</style>
+      <div className="toolbar-container">
+
+
+        {/* Controls: Search, Filter, Delete */}
+        <div className="toolbar-controls">
+          {/* Search */}
+          <div className="toolbar-search">
+            <Search size={16} style={{ position: 'absolute', left: '0.85rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+            <input
+              type="text"
+              placeholder="Search items..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="form-input"
+              style={{ paddingLeft: '2.5rem', height: '38px', fontSize: '0.9rem', width: '100%' }}
+            />
+          </div>
+
+          {/* Filter */}
+          <div className="toolbar-filter-wrapper">
+            <CustomDropdown
+              options={[
+                { value: 'all', label: 'All Status' },
+                { value: 'available', label: 'Available' },
+                { value: 'used', label: 'Used' }
+              ]}
+              value={filterStatus}
+              onChange={setFilterStatus}
+              style={{ width: '100%', height: '38px' }}
+            />
+          </div>
+
+          {/* Delete All Action */}
+          {selectedNumbers.size > 0 && (
+            <button onClick={handleBulkDelete} className="btn btn-danger animate-fade-in toolbar-div-delete" style={{ flex: '0 0 auto', height: '38px', justifyContent: 'center' }}>
+              <Trash2 size={16} style={{ marginRight: '0.4rem' }} /> Delete ({selectedNumbers.size})
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* 3. Manage Ranges Card (Always Visible) */}
+      {/* 3. Manage Ranges Card (Always Visible) */}
+      <div style={{
+        padding: '1.5rem',
+        marginBottom: '2rem',
+        borderRadius: '16px',
+        border: '1px solid var(--border-color)',
+        backgroundColor: 'transparent'
+      }}>
+        {/* Mobile Styles */}
+        <style>{`
+              .manage-tabs-wrapper {
+                display: flex;
+                gap: 1.5rem;
+                margin-bottom: 1.5rem;
+                border-bottom: 1px solid var(--border-color);
+                padding-bottom: 0.5rem;
+                overflow-x: auto;
+                white-space: nowrap;
+                -webkit-overflow-scrolling: touch;
+                scrollbar-width: none;
+              }
+              .manage-tabs-wrapper::-webkit-scrollbar {
+                display: none;
+              }
+              .manage-tab-btn {
+                background: none;
+                border: none;
+                padding: 0.5rem 0.25rem;
+                font-size: 0.95rem;
+                font-weight: 600;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                gap: 0.5rem;
+                flex: 0 0 auto;
+              }
+              .manage-label-spacer {
+                 visibility: hidden;
+              }
+              
+              @media (max-width: 768px) {
+                 .manage-label-spacer {
+                    display: none !important;
+                 }
+              }
+            `}</style>
+
+        {/* Tabs */}
+        <div className="manage-tabs-wrapper">
+          <button
+            onClick={() => setManageTab('add')}
+            className="manage-tab-btn"
+            style={{
+              color: manageTab === 'add' ? 'var(--accent-primary)' : 'var(--text-secondary)',
+              borderBottom: manageTab === 'add' ? '2px solid var(--accent-primary)' : '2px solid transparent',
+            }}
+          >
+            <Plus size={16} /> Add New Range
+          </button>
+          <button
+            onClick={() => setManageTab('status')}
+            className="manage-tab-btn"
+            style={{
+              color: manageTab === 'status' ? 'var(--warning)' : 'var(--text-secondary)',
+              borderBottom: manageTab === 'status' ? '2px solid var(--warning)' : '2px solid transparent',
+            }}
+          >
+            <RefreshCw size={16} /> Update Status
+          </button>
+
+          <button
+            onClick={() => setManageTab('delete')}
+            className="manage-tab-btn"
+            style={{
+              color: manageTab === 'delete' ? 'var(--danger)' : 'var(--text-secondary)',
+              borderBottom: manageTab === 'delete' ? '2px solid var(--danger)' : '2px solid transparent',
+            }}
+          >
+            <Trash2 size={16} /> Delete Range
+          </button>
+        </div>
+
+        {/* Tab Content: ADD */}
+        {/* Tab Content: ADD */}
+        {manageTab === 'add' && (
+          <div className="animate-fade-in" style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'flex-end' }}>
+            <div className="form-group" style={{ flex: '1 1 200px' }}>
+              <label className="form-label">Start Number</label>
+              <input type="text" value={rangeStart} onChange={(e) => setRangeStart(e.target.value)} placeholder="RM00000000" className="form-input" />
+            </div>
+            <div className="form-group" style={{ flex: '1 1 200px' }}>
+              <label className="form-label">End Number</label>
+              <input type="text" value={rangeEnd} onChange={(e) => setRangeEnd(e.target.value)} placeholder="RM00000100" className="form-input" />
+            </div>
+            <div className="form-group" style={{ flex: '1 1 150px' }}>
+              <label className="form-label manage-label-spacer" style={{ visibility: 'hidden' }}>Action</label>
+              <button onClick={handleBulkAdd} className="btn btn-primary" style={{ width: '100%', height: '38px', justifyContent: 'center' }}>Add Numbers</button>
+            </div>
+          </div>
+        )}
+
+        {/* Tab Content: STATUS */}
+        {manageTab === 'status' && (
+          <div className="animate-fade-in" style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'flex-end' }}>
+            <div className="form-group" style={{ flex: '2 1 300px' }}>
+              <label className="form-label">New Status for Selected <span style={{ color: 'var(--accent-primary)' }}>({selectedNumbers.size} items)</span></label>
+              <CustomDropdown
+                options={[
+                  { value: 'available', label: 'Available' },
+                  { value: 'used', label: 'Used' }
+                ]}
+                value={bulkStatusValue}
+                onChange={setBulkStatusValue}
+                style={{ width: '100%' }}
+              />
+            </div>
+            <div className="form-group" style={{ flex: '1 1 150px' }}>
+              <label className="form-label manage-label-spacer" style={{ visibility: 'hidden' }}>Action</label>
+              <button
+                onClick={handleBulkStatusUpdate}
+                className="btn"
+                style={{
+                  width: '100%',
+                  height: '38px',
+                  justifyContent: 'center',
+                  backgroundColor: 'var(--warning)',
+                  color: '#000',
+                  fontWeight: 600,
+                  opacity: selectedNumbers.size === 0 ? 0.5 : 1,
+                  cursor: selectedNumbers.size === 0 ? 'not-allowed' : 'pointer'
+                }}
+                disabled={selectedNumbers.size === 0}
+              >
+                Update Status
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Tab Content: DELETE */}
+        {manageTab === 'delete' && (
+          <div className="animate-fade-in" style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'flex-end' }}>
+            <div className="form-group" style={{ flex: '1 1 200px' }}>
+              <label className="form-label">Start Number</label>
+              <input type="text" value={deleteRangeStart} onChange={(e) => setDeleteRangeStart(e.target.value)} placeholder="RM00000000" className="form-input" />
+            </div>
+            <div className="form-group" style={{ flex: '1 1 200px' }}>
+              <label className="form-label">End Number</label>
+              <input type="text" value={deleteRangeEnd} onChange={(e) => setDeleteRangeEnd(e.target.value)} placeholder="RM00000100" className="form-input" />
+            </div>
+            <div className="form-group" style={{ flex: '1 1 150px' }}>
+              <label className="form-label manage-label-spacer" style={{ visibility: 'hidden' }}>Action</label>
+              <button onClick={handleBulkDeleteByRange} className="btn btn-danger" style={{ width: '100%', height: '38px', justifyContent: 'center' }}>Delete Numbers</button>
+            </div>
+          </div>
+        )}
+
+
+      </div>
+
+      {/* 5. Tracking Numbers Table/List */}
+      <div className="card" style={{ padding: 0, overflow: 'hidden', border: '1px solid var(--border-color)', borderRadius: '16px' }}>
         {filteredNumbers.length === 0 ? (
           <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
-            <p>No tracking numbers found. Add tracking numbers using the Bulk Add button.</p>
+            <p>No tracking numbers found. Add data using the tool above.</p>
           </div>
         ) : (
           <>
+            {/* Desktop Table View */}
             <div className="tn-table-desktop" style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
-                  <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
+                  <tr style={{ borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-card)' }}>
                     <th style={{ width: '50px', padding: '1rem' }}>
                       <input
                         type="checkbox"
-                        checked={filteredNumbers.length > 0 && filteredNumbers.every(tn => selectedNumbers.has(tn.number))}
-                        onChange={toggleSelectAll}
+                        checked={currentItems.length > 0 && currentItems.every(tn => selectedNumbers.has(tn.number))}
+                        onChange={() => {
+                          const allSelected = currentItems.every(tn => selectedNumbers.has(tn.number))
+                          const newSelected = new Set(selectedNumbers)
+                          if (allSelected) {
+                            currentItems.forEach(tn => newSelected.delete(tn.number))
+                          } else {
+                            currentItems.forEach(tn => newSelected.add(tn.number))
+                          }
+                          setSelectedNumbers(newSelected)
+                        }}
+                        style={{ cursor: 'pointer' }}
                       />
                     </th>
                     <th style={{ textAlign: 'left', padding: '1rem', fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Tracking Number</th>
@@ -908,12 +1283,13 @@ const TrackingNumberManagement = ({ trackingNumbers, setTrackingNumbers, showAle
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredNumbers.map((tn) => (
+                  {currentItems.map((tn) => (
                     <tr
                       key={tn.number}
                       style={{
                         borderBottom: '1px solid var(--border-color)',
-                        backgroundColor: tn.status === 'used' ? 'rgba(239, 68, 68, 0.02)' : 'transparent'
+                        backgroundColor: tn.status === 'used' ? 'rgba(239, 68, 68, 0.02)' : 'transparent',
+                        transition: 'background 0.2s'
                       }}
                     >
                       <td style={{ padding: '1rem' }}>
@@ -921,26 +1297,21 @@ const TrackingNumberManagement = ({ trackingNumbers, setTrackingNumbers, showAle
                           type="checkbox"
                           checked={selectedNumbers.has(tn.number)}
                           onChange={() => toggleSelect(tn.number)}
+                          style={{ cursor: 'pointer' }}
                         />
                       </td>
                       <td style={{ padding: '1rem', fontWeight: 500, color: 'var(--text-primary)' }}>{tn.number}</td>
                       <td style={{ padding: '1rem' }}>
                         {editingNumber?.id === tn.id ? (
-                          <select
+                          <CustomDropdown
+                            options={[
+                              { value: 'available', label: 'Available' },
+                              { value: 'used', label: 'Used' }
+                            ]}
                             value={editValue}
-                            onChange={(e) => setEditValue(e.target.value)}
-                            className="form-input"
-                            style={{
-                              padding: '0.25rem 0.5rem',
-                              fontSize: '0.8125rem',
-                              height: 'auto',
-                              width: '120px'
-                            }}
-                            autoFocus
-                          >
-                            <option value="available">Available</option>
-                            <option value="used">Used</option>
-                          </select>
+                            onChange={setEditValue}
+                            style={{ minWidth: '120px' }}
+                          />
                         ) : (
                           <span style={{
                             padding: '0.25rem 0.6rem',
@@ -957,13 +1328,13 @@ const TrackingNumberManagement = ({ trackingNumbers, setTrackingNumbers, showAle
                       <td style={{ padding: '1rem', textAlign: 'right' }}>
                         {editingNumber?.id === tn.id ? (
                           <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-                            <button onClick={handleSaveEdit} className="btn btn-sm btn-primary" style={{ padding: '0.3rem' }} title="Save">✓</button>
-                            <button onClick={handleCancelEdit} className="btn btn-sm btn-secondary" style={{ padding: '0.3rem' }} title="Cancel">✕</button>
+                            <button onClick={handleSaveEdit} className="btn btn-sm btn-primary" title="Save"><Check size={14} /></button>
+                            <button onClick={handleCancelEdit} className="btn btn-sm btn-secondary" title="Cancel"><X size={14} /></button>
                           </div>
                         ) : (
                           <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-                            <button onClick={() => handleEdit(tn)} className="btn btn-sm btn-secondary" style={{ padding: '0.3rem' }} title="Edit"><Edit2 size={12} /></button>
-                            <button onClick={() => handleDelete(tn.number)} className="btn btn-sm btn-danger" style={{ padding: '0.3rem' }} title="Delete"><Trash2 size={12} /></button>
+                            <button onClick={() => handleEdit(tn)} className="btn btn-sm btn-ghost" title="Edit"><Edit2 size={14} /></button>
+                            <button onClick={() => handleDelete(tn.number)} className="btn btn-sm btn-ghost" style={{ color: 'var(--danger)' }} title="Delete"><Trash2 size={14} /></button>
                           </div>
                         )}
                       </td>
@@ -973,74 +1344,98 @@ const TrackingNumberManagement = ({ trackingNumbers, setTrackingNumbers, showAle
               </table>
             </div>
 
-            <div className="tn-mobile-list" style={{ padding: '0.5rem' }}>
-              {filteredNumbers.map((tn) => (
-                <div key={tn.number + '-mobile'} className="tn-mobile-card" style={{
-                  backgroundColor: tn.status === 'used' ? 'rgba(239, 68, 68, 0.02)' : 'var(--bg-card)'
+            {/* Mobile List View */}
+            <div className="tn-mobile-list" style={{ padding: '0.75rem', flexDirection: 'column', gap: '0.75rem' }}>
+              {currentItems.map((tn) => (
+                <div key={tn.number + '-mobile'} style={{
+                  backgroundColor: 'var(--bg-card)',
+                  borderRadius: '12px',
+                  border: '1px solid var(--border-color)',
+                  padding: '1rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.75rem'
                 }}>
-                  <div className="tn-mobile-card-header">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                       <input
                         type="checkbox"
                         checked={selectedNumbers.has(tn.number)}
                         onChange={() => toggleSelect(tn.number)}
+                        style={{ transform: 'scale(1.2)' }}
                       />
-                      <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{tn.number}</span>
+                      <span style={{ fontWeight: 600, fontSize: '0.95rem' }}>{tn.number}</span>
                     </div>
-                    {editingNumber?.id === tn.id ? (
-                      <div style={{ display: 'flex', gap: '0.5rem' }}>
-                        <button onClick={handleSaveEdit} className="btn btn-sm btn-primary" style={{ padding: '0.3rem 0.6rem' }}>Save</button>
-                        <button onClick={handleCancelEdit} className="btn btn-sm btn-secondary" style={{ padding: '0.3rem 0.6rem' }}>X</button>
-                      </div>
-                    ) : (
-                      <div style={{ display: 'flex', gap: '0.5rem' }}>
-                        <button onClick={() => handleEdit(tn)} className="btn btn-sm btn-secondary" style={{ padding: '0.3rem' }}><Edit2 size={14} /></button>
-                        <button onClick={() => handleDelete(tn.number)} className="btn btn-sm btn-danger" style={{ padding: '0.3rem' }}><Trash2 size={14} /></button>
-                      </div>
-                    )}
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.5rem' }}>
-                    <span style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>Status</span>
-                    {editingNumber?.id === tn.id ? (
-                      <select
-                        value={editValue}
-                        onChange={(e) => setEditValue(e.target.value)}
-                        className="form-input"
-                        style={{ padding: '0.2rem 0.5rem', fontSize: '0.8125rem', height: 'auto', width: 'auto' }}
-                      >
-                        <option value="available">Available</option>
-                        <option value="used">Used</option>
-                      </select>
-                    ) : (
+                    {editingNumber?.id !== tn.id && (
                       <span style={{
-                        padding: '0.2rem 0.6rem',
+                        padding: '0.25rem 0.6rem',
                         borderRadius: '50px',
-                        fontSize: '0.75rem',
-                        fontWeight: 600,
+                        fontSize: '0.7rem',
+                        fontWeight: 700,
                         backgroundColor: tn.status === 'used' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(16, 185, 129, 0.1)',
-                        color: tn.status === 'used' ? 'var(--danger)' : 'var(--success)'
+                        color: tn.status === 'used' ? 'var(--danger)' : 'var(--success)',
+                        textTransform: 'uppercase'
                       }}>
                         {tn.status === 'used' ? 'Used' : 'Available'}
                       </span>
                     )}
                   </div>
+
+                  {editingNumber?.id === tn.id ? (
+                    <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', paddingTop: '0.5rem', borderTop: '1px solid var(--border-color)' }}>
+                      <div style={{ flex: 1 }}>
+                        <CustomDropdown
+                          options={[{ value: 'available', label: 'Available' }, { value: 'used', label: 'Used' }]}
+                          value={editValue}
+                          onChange={setEditValue}
+                          style={{ width: '100%' }}
+                        />
+                      </div>
+                      <button onClick={handleSaveEdit} className="btn btn-sm btn-primary"><Check size={16} /></button>
+                      <button onClick={handleCancelEdit} className="btn btn-sm btn-secondary"><X size={16} /></button>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid var(--border-color)' }}>
+                      <button onClick={() => handleEdit(tn)} className="btn btn-sm btn-secondary" style={{ flex: 1, justifyContent: 'center' }}>Edit</button>
+                      <button onClick={() => handleDelete(tn.number)} className="btn btn-sm btn-danger" style={{ flex: 1, justifyContent: 'center' }}>Delete</button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+              <Pagination
+                currentPage={currentPage}
+                totalPages={totalPages}
+                onPageChange={handlePageChange}
+                totalItems={filteredNumbers.length}
+                itemsPerPage={itemsPerPage}
+                onItemsPerPageChange={setItemsPerPage}
+              />
+            )}
           </>
         )}
       </div>
-    </div>
+    </div >
   )
 }
 
 // Data Management Component
 const DataManagement = ({ orders, expenses, inventory, products, settings, trackingNumbers, orderCounter, onDataImported, showAlert, showConfirm, showToast }) => {
   const [importStatus, setImportStatus] = useState(null)
+  const [pendingFile, setPendingFile] = useState(null)
+  const [showSettingsPrompt, setShowSettingsPrompt] = useState(false)
+  const [promptType, setPromptType] = useState(null) // 'export' or 'import'
 
-  const handleExport = async () => {
-    // Also include inventory in the export function call
-    const result = await exportAllData(orders, expenses, products, settings, trackingNumbers, orderCounter, inventory)
+  const handleExportPrompt = () => {
+    setPromptType('export')
+    setShowSettingsPrompt(true)
+  }
+
+  const handleExport = async (includeSettings) => {
+    setShowSettingsPrompt(false)
+    const result = await exportAllData(orders, expenses, products, settings, trackingNumbers, orderCounter, inventory, includeSettings)
     if (result.success) {
       showToast(result.message, 'success')
     } else {
@@ -1048,7 +1443,7 @@ const DataManagement = ({ orders, expenses, inventory, products, settings, track
     }
   }
 
-  const handleImport = async (e) => {
+  const handleFileSelect = (e) => {
     const file = e.target.files[0]
     if (!file) return
 
@@ -1057,47 +1452,63 @@ const DataManagement = ({ orders, expenses, inventory, products, settings, track
       return
     }
 
+    setPendingFile(file)
+    setPromptType('import')
+    setShowSettingsPrompt(true)
+    e.target.value = '' // Reset file input
+  }
+
+  const handleImport = async (includeSettings) => {
+    setShowSettingsPrompt(false)
+    if (!pendingFile) return
+
     try {
       setImportStatus('Importing...')
-      const result = await importAllData(file)
 
-      if (result.success) {
-        setImportStatus('Import successful!')
-        showToast('Data imported successfully! The page will reload.', 'success')
+      // Read the file manually to pass includeSettings
+      const reader = new FileReader()
+      reader.onload = async (e) => {
+        try {
+          const data = JSON.parse(e.target.result)
+          const result = await importAllDataFromObject(data, includeSettings)
 
-        // Call the callback to update parent state
-        if (onDataImported) {
-          onDataImported(result.data)
+          if (result.success) {
+            setImportStatus('Import successful!')
+            showToast('Data imported successfully! The page will reload.', 'success')
+
+            if (onDataImported) {
+              onDataImported(result.data)
+            }
+
+            setTimeout(() => {
+              window.location.reload()
+            }, 1500)
+          } else {
+            setImportStatus('Import failed')
+            showToast(result.message, 'error')
+          }
+        } catch (error) {
+          setImportStatus('Import failed')
+          showToast('Failed to import data: ' + error.message, 'error')
         }
-
-        // Reload page after a short delay to show imported data
-        setTimeout(() => {
-          window.location.reload()
-        }, 1500)
-      } else {
-        setImportStatus('Import failed')
-        showToast(result.message, 'error')
       }
+      reader.onerror = () => {
+        setImportStatus('Import failed')
+        showToast('Failed to read file', 'error')
+      }
+      reader.readAsText(pendingFile)
     } catch (error) {
       setImportStatus('Import failed')
       showToast('Failed to import data: ' + error.message, 'error')
     } finally {
-      e.target.value = '' // Reset file input
+      setPendingFile(null)
     }
   }
 
-  const handleClear = () => {
-    showConfirm('Warning: Data Loss', 'Are you sure you want to clear ALL data? This action cannot be undone!', () => {
-      showConfirm('Final Confirmation', 'This will delete all orders, expenses, products, settings, and tracking numbers. Are you absolutely sure?', async () => {
-        const result = await clearAllData()
-        if (result.success) {
-          showToast('All data cleared! The page will reload.', 'success')
-          setTimeout(() => window.location.reload(), 1500)
-        } else {
-          showToast(result.message, 'error')
-        }
-      }, 'danger', 'Yes, Delete Everything')
-    }, 'danger', 'Proceed')
+  const handleCancelPrompt = () => {
+    setShowSettingsPrompt(false)
+    setPendingFile(null)
+    setPromptType(null)
   }
 
   return (
@@ -1114,10 +1525,20 @@ const DataManagement = ({ orders, expenses, inventory, products, settings, track
         <p style={{
           fontSize: '0.875rem',
           color: 'var(--text-muted)',
-          marginBottom: '1.5rem'
+          marginBottom: '0.75rem'
         }}>
           Export your data to a JSON file that can be imported in any browser or incognito mode.
-          Data is also automatically saved to localStorage for quick access.
+        </p>
+        <p style={{
+          fontSize: '0.8rem',
+          color: 'var(--text-muted)',
+          marginBottom: '1.5rem',
+          backgroundColor: 'rgba(59, 130, 246, 0.1)',
+          padding: '0.75rem',
+          borderRadius: '8px',
+          border: '1px solid rgba(59, 130, 246, 0.2)'
+        }}>
+          <strong>Includes:</strong> Orders, Expenses, Inventory, Products, Quotations, Order Sources, Tracking Numbers, Expense Categories, Inventory Categories
         </p>
 
         <div style={{
@@ -1133,7 +1554,7 @@ const DataManagement = ({ orders, expenses, inventory, products, settings, track
               Save all data to a JSON file
             </p>
             <button
-              onClick={handleExport}
+              onClick={handleExportPrompt}
               className="btn btn-primary"
               style={{ width: '100%' }}
             >
@@ -1154,7 +1575,7 @@ const DataManagement = ({ orders, expenses, inventory, products, settings, track
               <input
                 type="file"
                 accept=".json"
-                onChange={handleImport}
+                onChange={handleFileSelect}
                 style={{ display: 'none' }}
               />
             </label>
@@ -1170,6 +1591,77 @@ const DataManagement = ({ orders, expenses, inventory, products, settings, track
           </div>
         </div>
       </div>
+
+      {/* Settings Include Prompt Modal */}
+      {showSettingsPrompt && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.6)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1100,
+          padding: '1rem'
+        }}>
+          <div style={{
+            backgroundColor: 'var(--bg-card)',
+            borderRadius: '16px',
+            padding: '2rem',
+            maxWidth: '400px',
+            width: '100%',
+            border: '1px solid var(--border-color)',
+            boxShadow: '0 20px 40px rgba(0, 0, 0, 0.4)'
+          }}>
+            <h3 style={{
+              fontSize: '1.25rem',
+              fontWeight: 700,
+              marginBottom: '1rem',
+              color: 'var(--text-primary)'
+            }}>
+              {promptType === 'export' ? 'Export Options' : 'Import Options'}
+            </h3>
+            <p style={{
+              fontSize: '0.925rem',
+              color: 'var(--text-secondary)',
+              marginBottom: '1.5rem',
+              lineHeight: 1.5
+            }}>
+              Would you like to {promptType === 'export' ? 'include' : 'restore'} your application settings (theme, preferences, business info, etc.) {promptType === 'export' ? 'in the backup' : 'from the backup'}?
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              <button
+                onClick={() => promptType === 'export' ? handleExport(true) : handleImport(true)}
+                className="btn btn-primary"
+                style={{ width: '100%', justifyContent: 'center', padding: '0.875rem' }}
+              >
+                Yes, Include Settings
+              </button>
+              <button
+                onClick={() => promptType === 'export' ? handleExport(false) : handleImport(false)}
+                className="btn btn-secondary"
+                style={{ width: '100%', justifyContent: 'center', padding: '0.875rem' }}
+              >
+                No, Data Only
+              </button>
+              <button
+                onClick={handleCancelPrompt}
+                style={{
+                  width: '100%',
+                  padding: '0.75rem',
+                  backgroundColor: 'transparent',
+                  border: 'none',
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer',
+                  fontSize: '0.875rem'
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1349,7 +1841,7 @@ const CurfoxSettings = ({ settings, setSettings, showToast }) => {
               type="text"
               className="form-input"
               value={originCity}
-              onChange={(e) => setOriginCity(e.target.value)}
+              onChange={(e) => setOriginCity(toTitleCase(e.target.value))}
               placeholder="e.g. Colombo 05"
             />
             <small style={{ color: 'var(--text-muted)' }}>Must match your Curfox Pickup City</small>
@@ -1360,7 +1852,7 @@ const CurfoxSettings = ({ settings, setSettings, showToast }) => {
               type="text"
               className="form-input"
               value={originDistrict}
-              onChange={(e) => setOriginDistrict(e.target.value)}
+              onChange={(e) => setOriginDistrict(toTitleCase(e.target.value))}
               placeholder="e.g. Colombo"
             />
             <small style={{ color: 'var(--text-muted)' }}>Must match your Curfox Pickup District</small>
@@ -1517,6 +2009,8 @@ const GoogleDriveBackup = ({ settings, setSettings, orders, expenses, inventory,
   const [driveFiles, setDriveFiles] = useState([])
   const [isLoadingFiles, setIsLoadingFiles] = useState(false)
   const [lastBackup, setLastBackup] = useState(settings?.googleDrive?.lastBackup || null)
+  const [showHelp, setShowHelp] = useState(false)
+  const [showClientId, setShowClientId] = useState(false)
 
   useEffect(() => {
     if (settings?.googleDrive) {
@@ -1681,141 +2175,244 @@ const GoogleDriveBackup = ({ settings, setSettings, orders, expenses, inventory,
   }
 
   return (
-    <div>
-      <div style={{ marginBottom: '1.5rem' }}>
-        <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '0.5rem', lineHeight: '1.6' }}>
-          Securely backup your business data to Google Drive. Requires a Google Cloud Client ID.
-        </p>
-        {!isConnected && (
-          <p style={{ fontSize: '0.75rem', color: 'var(--warning)', fontWeight: 500 }}>
-            Note: You must connect to Google Drive to see and restore available cloud backups.
-          </p>
-        )}
-      </div>
-
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-        gap: '1.5rem',
-        marginBottom: '2rem'
-      }}>
-        <div className="form-group">
-          <label className="form-label" style={{ fontWeight: 600 }}>Google Client ID</label>
-          <input
-            type="text"
-            className="form-input"
-            value={clientId}
-            onChange={(e) => setClientId(e.target.value)}
-            placeholder="Enter your OAuth 2.0 Client ID"
-          />
-          <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
-            Authorized JavaScript Origin: <code style={{ color: 'var(--accent-primary)' }}>{window.location.origin}</code>
+    <div className="animate-fade-in">
+      {/* Header & Intro */}
+      <div style={{ marginBottom: '2rem', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem' }}>
+        <div>
+          <p style={{ fontSize: '0.925rem', color: 'var(--text-secondary)', lineHeight: '1.6', margin: 0 }}>
+            Securely backup your business data to your personal Google Drive.
+            <br />Requires a one-time setup of a Google Cloud Client ID.
           </p>
         </div>
+        <button
+          onClick={() => setShowHelp(!showHelp)}
+          className="btn btn-sm btn-secondary"
+          style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+        >
+          <Info size={16} color="var(--accent-primary)" /> Setup Guide
+        </button>
+      </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '1rem',
-            backgroundColor: 'var(--bg-secondary)',
-            borderRadius: 'var(--radius)',
-            border: '1px solid var(--border-color)'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <label className="switch">
-                <input
-                  type="checkbox"
-                  checked={isAutoBackupEnabled}
-                  onChange={(e) => setIsAutoBackupEnabled(e.target.checked)}
-                />
-                <span className="slider round"></span>
-              </label>
-              <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                Auto-Backup
-              </span>
-            </div>
+      {showHelp && (
+        <div style={{
+          marginBottom: '2rem',
+          padding: '1.5rem',
+          backgroundColor: 'rgba(var(--accent-rgb), 0.04)',
+          borderRadius: '16px',
+          border: '1px solid rgba(var(--accent-rgb), 0.15)',
+          animation: 'slideDown 0.3s ease'
+        }}>
+          <h5 style={{ margin: '0 0 1rem 0', fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+            <Globe size={18} color="var(--accent-primary)" /> Step-by-Step Setup Guide
+          </h5>
+          <ol style={{ paddingLeft: '1.2rem', margin: 0, fontSize: '0.9rem', color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            <li>Visit the <a href="https://console.cloud.google.com/" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-primary)', fontWeight: 600 }}>Google Cloud Console</a> and sign in.</li>
+            <li>Create a new project (e.g., "AOF Backups") and search for "Google Drive API" to enable it.</li>
+            <li>Configure the <strong>OAuth Consent Screen</strong> (External User Type).Publish the app.</li>
+            <li>Create <strong>OAuth Client ID</strong> credentials for a Web Application.</li>
+            <li>Add <code style={{ backgroundColor: 'rgba(255,255,255,0.1)', padding: '0.2rem 0.4rem', borderRadius: '4px' }}>{window.location.origin}</code> to Authorized JavaScript origins.</li>
+            <li>Copy the Client ID and paste it below.</li>
+          </ol>
+        </div>
+      )}
 
-            {isAutoBackupEnabled && (
-              <select
-                className="form-input"
-                value={backupFrequency}
-                onChange={(e) => setBackupFrequency(e.target.value)}
-                style={{ width: 'auto', padding: '0.2rem 0.5rem', height: 'auto', fontSize: '0.8125rem' }}
-              >
-                <option value="hourly">Hourly</option>
-                <option value="6hours">6 Hours</option>
-                <option value="12hours">12 Hours</option>
-                <option value="daily">Daily</option>
-                <option value="weekly">Weekly</option>
-              </select>
-            )}
+      {/* Main Settings Grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
+
+        {/* Card 1: Credentials */}
+        <div style={{
+          padding: '1.5rem',
+          backgroundColor: 'var(--bg-secondary)',
+          borderRadius: '16px',
+          border: '1px solid var(--border-color)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '1.25rem'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              <ShieldCheck size={20} color="var(--accent-primary)" /> Credentials
+            </h4>
+            {isConnected && <span className="badge badge-success" style={{ fontSize: '0.75rem' }}>Connected</span>}
           </div>
 
-          {lastBackup && (
-            <div style={{
-              padding: '0.75rem 1rem',
-              backgroundColor: 'rgba(16, 185, 129, 0.05)',
-              borderRadius: 'var(--radius)',
-              border: '1px solid rgba(16, 185, 129, 0.2)',
-              fontSize: '0.8125rem',
-              color: 'var(--success)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem'
-            }}>
-              <Database size={14} />
-              Last Backup: {new Date(lastBackup).toLocaleString()}
+          <div>
+            <label className="form-label" style={{ fontSize: '0.85rem' }}>OAuth 2.0 Client ID</label>
+            <div style={{ position: 'relative' }}>
+              <input
+                type={showClientId ? "text" : "password"}
+                className="form-input"
+                value={clientId}
+                onChange={(e) => setClientId(e.target.value)}
+                placeholder="Ex: 123456789-abcdef..."
+                style={{ paddingRight: '2.5rem', fontFamily: 'monospace', fontSize: '0.9rem' }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowClientId(!showClientId)}
+                style={{
+                  position: 'absolute',
+                  right: '0.75rem',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer',
+                  padding: 0,
+                  display: 'flex'
+                }}
+              >
+                {showClientId ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
             </div>
-          )}
+            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+              Origin constraint: ensure <code style={{ color: 'var(--text-primary)' }}>{window.location.origin}</code> is allowed in GCloud.
+            </p>
+          </div>
+        </div>
+
+        {/* Card 2: Automation */}
+        <div style={{
+          padding: '1.5rem',
+          backgroundColor: 'var(--bg-secondary)',
+          borderRadius: '16px',
+          border: '1px solid var(--border-color)',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between'
+        }}>
+          <div>
+            <h4 style={{ margin: '0 0 1.25rem 0', fontSize: '1rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              <RefreshCw size={20} color={isAutoBackupEnabled ? "var(--success)" : "var(--text-muted)"} /> Automation
+            </h4>
+
+            <div style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '1rem',
+              padding: '1rem',
+              backgroundColor: 'var(--bg-card)',
+              borderRadius: '12px',
+              border: '1px solid var(--border-color)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <label className="switch">
+                  <input
+                    type="checkbox"
+                    checked={isAutoBackupEnabled}
+                    onChange={(e) => setIsAutoBackupEnabled(e.target.checked)}
+                  />
+                  <span className="slider round"></span>
+                </label>
+                <span style={{ fontWeight: 600, fontSize: '0.95rem' }}>Auto-Backup</span>
+              </div>
+
+              <div style={{ opacity: isAutoBackupEnabled ? 1 : 0.5, pointerEvents: isAutoBackupEnabled ? 'auto' : 'none' }}>
+                <CustomDropdown
+                  options={[
+                    { value: 'hourly', label: 'Every Hour' },
+                    { value: '6hours', label: 'Every 6H' },
+                    { value: '12hours', label: 'Every 12H' },
+                    { value: 'daily', label: 'Daily' },
+                    { value: 'weekly', label: 'Weekly' }
+                  ]}
+                  value={backupFrequency}
+                  onChange={setBackupFrequency}
+                  style={{ width: '130px', fontSize: '0.85rem' }}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div style={{ marginTop: '1.25rem' }}>
+            {lastBackup ? (
+              <div style={{
+                padding: '0.85rem',
+                backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                borderRadius: '12px',
+                color: 'var(--success)',
+                fontSize: '0.85rem',
+                fontWeight: 500,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.6rem'
+              }}>
+                <CheckCircle size={16} />
+                <span>Last synced: {new Date(lastBackup).toLocaleString()}</span>
+              </div>
+            ) : (
+              <div style={{
+                padding: '0.85rem',
+                backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                borderRadius: '12px',
+                color: 'var(--text-muted)',
+                fontSize: '0.85rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.6rem'
+              }}>
+                <Cloud size={16} /> No backup created yet.
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
+      {/* Drive File Browser */}
       {isConnected && (
-        <div style={{ marginBottom: '2rem' }}>
+        <div style={{ marginBottom: '2rem', animation: 'fadeIn 0.5s ease' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-            <h4 style={{ fontSize: '1rem', fontWeight: 600 }}>Available Backups on Drive</h4>
+            <h4 style={{ fontSize: '1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Database size={18} /> Cloud Backups
+            </h4>
             <button
               onClick={fetchDriveFiles}
               className="btn btn-sm btn-secondary"
               disabled={isLoadingFiles}
             >
-              <Search size={14} style={{ marginRight: '0.4rem' }} />
-              Scan Drive
+              <RefreshCw size={14} className={isLoadingFiles ? 'spin' : ''} style={{ marginRight: '0.4rem' }} />
+              {isLoadingFiles ? 'Scanning...' : 'Refresh List'}
             </button>
           </div>
 
           <div style={{
-            maxHeight: '200px',
+            maxHeight: '220px',
             overflowY: 'auto',
+            overflowX: 'auto',
             border: '1px solid var(--border-color)',
-            borderRadius: 'var(--radius)',
+            borderRadius: '12px',
             backgroundColor: 'var(--bg-secondary)'
           }}>
             {isLoadingFiles ? (
-              <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>Loading files...</div>
+              <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>Checking Google Drive...</div>
             ) : driveFiles.length === 0 ? (
-              <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>No backups found in 'AOF_Backups' folder.</div>
+              <div style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                <Cloud size={32} style={{ marginBottom: '0.5rem', opacity: 0.5 }} />
+                <p>No AOF backups found in your Drive.</p>
+              </div>
             ) : (
-              <table style={{ width: '100%', fontSize: '0.85rem' }}>
-                <thead style={{ position: 'sticky', top: 0, backgroundColor: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-color)' }}>
+              <table style={{ width: '100%', fontSize: '0.875rem', borderCollapse: 'collapse' }}>
+                <thead style={{ position: 'sticky', top: 0, backgroundColor: 'var(--bg-card)', zIndex: 5, borderBottom: '1px solid var(--border-color)' }}>
                   <tr>
-                    <th style={{ textAlign: 'left', padding: '0.75rem' }}>Filename</th>
-                    <th style={{ textAlign: 'left', padding: '0.75rem' }}>Date</th>
-                    <th style={{ textAlign: 'right', padding: '0.75rem' }}>Action</th>
+                    <th style={{ textAlign: 'left', padding: '1rem' }}>Filename</th>
+                    <th style={{ textAlign: 'left', padding: '1rem' }}>Created At</th>
+                    <th style={{ textAlign: 'right', padding: '1rem' }}>Action</th>
                   </tr>
                 </thead>
                 <tbody>
                   {driveFiles.map(file => (
-                    <tr key={file.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                      <td style={{ padding: '0.75rem' }}>{file.name}</td>
-                      <td style={{ padding: '0.75rem' }}>{new Date(file.createdTime).toLocaleString()}</td>
-                      <td style={{ padding: '0.75rem', textAlign: 'right' }}>
+                    <tr key={file.id} style={{ borderBottom: '1px solid var(--border-color)', transition: 'background 0.2s' }}>
+                      <td style={{ padding: '1rem', fontWeight: 500 }}>{file.name}</td>
+                      <td style={{ padding: '1rem', color: 'var(--text-secondary)' }}>{new Date(file.createdTime).toLocaleString()}</td>
+                      <td style={{ padding: '1rem', textAlign: 'right' }}>
                         <button
                           onClick={() => handleRestoreFromDrive(file)}
-                          className="btn btn-sm btn-success"
+                          className="btn btn-sm btn-ghost"
                           disabled={isRestoring}
+                          style={{ color: 'var(--accent-primary)', fontWeight: 600 }}
                         >
                           Restore
                         </button>
@@ -1829,18 +2426,20 @@ const GoogleDriveBackup = ({ settings, setSettings, orders, expenses, inventory,
         </div>
       )}
 
+      {/* Footer Actions */}
       <div style={{
         display: 'flex',
+        flexWrap: 'wrap',
         gap: '1rem',
         justifyContent: 'flex-end',
-        flexWrap: 'wrap',
-        paddingTop: '1rem',
+        alignItems: 'center',
+        paddingTop: '1.5rem',
         borderTop: '1px solid var(--border-color)'
       }}>
         <button
           onClick={handleSaveSettings}
           className="btn btn-secondary"
-          style={{ flex: window.innerWidth < 480 ? 1 : 'none' }}
+          style={{ minWidth: '120px', flex: '1 1 auto' }}
         >
           Save Config
         </button>
@@ -1850,7 +2449,7 @@ const GoogleDriveBackup = ({ settings, setSettings, orders, expenses, inventory,
             onClick={handleConnect}
             className="btn btn-primary"
             disabled={!clientId}
-            style={{ flex: window.innerWidth < 480 ? 1 : 'none', display: 'flex', alignItems: 'center', gap: '0.5rem', justifyContent: 'center' }}
+            style={{ minWidth: '140px', flex: '1 1 auto', display: 'flex', alignItems: 'center', gap: '0.5rem', justifyContent: 'center' }}
           >
             <Database size={18} />
             Connect
@@ -1860,10 +2459,10 @@ const GoogleDriveBackup = ({ settings, setSettings, orders, expenses, inventory,
             onClick={handleBackupNow}
             className="btn btn-primary"
             disabled={isUploading}
-            style={{ flex: window.innerWidth < 480 ? 1 : 'none', display: 'flex', alignItems: 'center', gap: '0.5rem', justifyContent: 'center' }}
+            style={{ minWidth: '160px', flex: '1 1 auto', display: 'flex', alignItems: 'center', gap: '0.5rem', justifyContent: 'center' }}
           >
             {isUploading ? (
-              'Uploading...'
+              <><RefreshCw size={18} className="spin" /> Uploading...</>
             ) : (
               <>
                 <Upload size={18} />
@@ -1877,32 +2476,67 @@ const GoogleDriveBackup = ({ settings, setSettings, orders, expenses, inventory,
   )
 }
 
+
+
 // General Configuration Component
 const GeneralConfiguration = ({ settings, setSettings, showToast }) => {
+  const [businessName, setBusinessName] = useState(settings?.businessName || 'AOF Biz - Management App')
+  const [businessTagline, setBusinessTagline] = useState(settings?.businessTagline || 'From Chaos To Clarity')
+  const [businessLogo, setBusinessLogo] = useState(settings?.businessLogo || null)
   const [defaultDeliveryCharge, setDefaultDeliveryCharge] = useState(settings?.general?.defaultDeliveryCharge ?? 400)
+  const [quotationExpiryDays, setQuotationExpiryDays] = useState(settings?.general?.quotationExpiryDays ?? 7)
+  const [defaultPageSize, setDefaultPageSize] = useState(settings?.general?.defaultPageSize ?? 'A4')
   const [isSaving, setIsSaving] = useState(false)
 
+  const fileInputRef = useRef(null)
+
   useEffect(() => {
-    if (settings?.general) {
-      setDefaultDeliveryCharge(settings.general.defaultDeliveryCharge ?? 400)
+    if (settings) {
+      setBusinessName(settings.businessName || 'AOF Biz - Management App')
+      setBusinessTagline(settings.businessTagline || 'From Chaos To Clarity')
+      setBusinessLogo(settings.businessLogo || null)
+      if (settings.general) {
+        setDefaultDeliveryCharge(settings.general.defaultDeliveryCharge ?? 400)
+        setQuotationExpiryDays(settings.general.quotationExpiryDays ?? 7)
+        setDefaultPageSize(settings.general.defaultPageSize ?? 'A4')
+      }
     }
   }, [settings])
+
+  const handleLogoChange = (e) => {
+    const file = e.target.files[0]
+    if (file) {
+      if (file.size > 2 * 1024 * 1024) {
+        showToast('Logo file size should be less than 2MB', 'error')
+        return
+      }
+      const reader = new FileReader()
+      reader.onloadend = () => {
+        setBusinessLogo(reader.result)
+      }
+      reader.readAsDataURL(file)
+    }
+  }
 
   const handleSave = async () => {
     setIsSaving(true)
     const updatedSettings = {
       ...settings,
+      businessName: businessName.trim() || 'AOF Biz - Management App',
+      businessTagline: businessTagline.trim() || 'From Chaos To Clarity',
+      businessLogo: businessLogo,
       general: {
         ...settings?.general,
-        defaultDeliveryCharge: Number(defaultDeliveryCharge)
+        defaultDeliveryCharge: Number(defaultDeliveryCharge),
+        quotationExpiryDays: Number(quotationExpiryDays),
+        defaultPageSize: defaultPageSize
       }
     }
 
     const success = await saveSettings(updatedSettings)
     if (success) {
       setSettings(updatedSettings)
-      showToast('General settings saved successfully', 'success')
-      // Dispatch event to notify other components (optional but good for real-time)
+      showToast('Business configuration saved successfully', 'success')
       window.dispatchEvent(new Event('settingsUpdated'))
     } else {
       showToast('Failed to save settings', 'error')
@@ -1912,16 +2546,130 @@ const GeneralConfiguration = ({ settings, setSettings, showToast }) => {
 
   return (
     <div>
-      <div className="form-group" style={{ maxWidth: '300px' }}>
-        <label className="form-label">Default Delivery Charge (Rs)</label>
-        <input
-          type="number"
-          className="form-input"
-          value={defaultDeliveryCharge}
-          onChange={(e) => setDefaultDeliveryCharge(e.target.value)}
-          placeholder="400"
-        />
-        <small style={{ color: 'var(--text-muted)' }}>This amount will be applied to new orders and quotations automatically.</small>
+      {/* Business Identity Section */}
+      <div style={{ marginBottom: '2.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '2rem' }}>
+        <h4 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1.25rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <Building2 size={18} color="var(--accent-primary)" />
+          Business Identity
+        </h4>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '2rem' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            <div className="form-group">
+              <label className="form-label">Business Name</label>
+              <input
+                type="text"
+                className="form-input"
+                value={businessName}
+                onChange={(e) => setBusinessName(e.target.value)}
+                placeholder="AOF Biz"
+              />
+              <small style={{ color: 'var(--text-muted)' }}>This appears at the top of your sidebar.</small>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Business Slogan / Tagline</label>
+              <input
+                type="text"
+                className="form-input"
+                value={businessTagline}
+                onChange={(e) => setBusinessTagline(e.target.value)}
+                placeholder="Powering your business growth"
+              />
+              <small style={{ color: 'var(--text-muted)' }}>Displayed elegantly below your business name.</small>
+            </div>
+          </div>
+
+          <div className="form-group" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '1.5rem', border: '2px dashed var(--border-color)', borderRadius: '16px', background: 'rgba(255,255,255,0.02)' }}>
+            <label className="form-label" style={{ marginBottom: '1rem', alignSelf: 'flex-start' }}>Business Logo</label>
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              style={{
+                width: '120px',
+                height: '120px',
+                borderRadius: '12px',
+                backgroundColor: 'rgba(0,0,0,0.2)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                overflow: 'hidden',
+                cursor: 'pointer',
+                border: '1px solid var(--border-color)',
+                position: 'relative',
+                transition: 'transform 0.2s ease'
+              }}
+              onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.05)'}
+              onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
+            >
+              {businessLogo ? (
+                <img src={businessLogo} alt="Logo Preview" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+              ) : (
+                <Upload size={32} color="var(--text-muted)" />
+              )}
+              <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: 'rgba(0,0,0,0.6)', color: 'white', fontSize: '0.65rem', textAlign: 'center', padding: '4px' }}>
+                Change Logo
+              </div>
+            </div>
+            <input
+              type="file"
+              ref={fileInputRef}
+              style={{ display: 'none' }}
+              accept="image/*"
+              onChange={handleLogoChange}
+            />
+            {businessLogo && (
+              <button
+                className="btn btn-sm btn-ghost"
+                style={{ marginTop: '0.75rem', color: 'var(--danger)', fontSize: '0.75rem' }}
+                onClick={() => setBusinessLogo(null)}
+              >
+                Reset to Default
+              </button>
+            )}
+            <small style={{ color: 'var(--text-muted)', marginTop: '0.5rem', textAlign: 'center' }}>Square PNG/SVG works best.</small>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.5rem', marginBottom: '1.5rem' }}>
+        <div className="form-group">
+          <label className="form-label">Default Delivery Charge (Rs)</label>
+          <input
+            type="number"
+            className="form-input"
+            value={defaultDeliveryCharge}
+            onChange={(e) => setDefaultDeliveryCharge(e.target.value)}
+            placeholder="400"
+          />
+          <small style={{ color: 'var(--text-muted)' }}>Applied to new orders and quotations.</small>
+        </div>
+
+        <div className="form-group">
+          <label className="form-label">Quotation Expiry (Days)</label>
+          <input
+            type="number"
+            className="form-input"
+            value={quotationExpiryDays}
+            onChange={(e) => setQuotationExpiryDays(e.target.value)}
+            placeholder="7"
+          />
+          <small style={{ color: 'var(--text-muted)' }}>Default validity period for quotations.</small>
+        </div>
+
+        <div className="form-group">
+          <label className="form-label">Default Print Page Size</label>
+          <select
+            className="form-input"
+            value={defaultPageSize}
+            onChange={(e) => setDefaultPageSize(e.target.value)}
+            style={{ backgroundColor: 'transparent' }}
+          >
+            <option value="A4" style={{ color: '#000' }}>A4 (Standard)</option>
+            <option value="A5" style={{ color: '#000' }}>A5 (Smaller)</option>
+            <option value="Letter" style={{ color: '#000' }}>Letter</option>
+          </select>
+          <small style={{ color: 'var(--text-muted)' }}>Sets the default layout for PDF & Print documents.</small>
+        </div>
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
@@ -1937,5 +2685,6 @@ const GeneralConfiguration = ({ settings, setSettings, showToast }) => {
     </div>
   )
 }
+
 
 export default Settings

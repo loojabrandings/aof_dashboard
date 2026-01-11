@@ -1,0 +1,34 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*' # Trigger when you push a tag like v1.0.1
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Build Web App
+        run: npm run build
+
+      - name: Build Electron EXE
+        run: npm run electron:build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Optional: Add Android Build logic here if you have 
+      # signing keys configured later.
+      # For now, this generates the Windows Release.

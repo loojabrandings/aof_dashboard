@@ -1,7 +1,7 @@
-// Supabase storage with data transformation
-// Data is stored in Supabase cloud database, accessible from any browser/device
+// Local IndexedDB storage using Dexie
+// Data is stored in the browser's IndexedDB.
 
-import { supabase } from './supabase'
+import { db } from '../db'
 
 // Bump version to invalidate any previous cached compat modes that might be too strict.
 const ORDERS_SCHEMA_CACHE_KEY = 'aof_orders_schema_missing_cols_v4'
@@ -9,163 +9,77 @@ const ORDER_SOURCES_WARNED_KEY = 'aof_warned_missing_order_sources_v1'
 // Debug/verification helper: confirm multi-item orders really persisted
 const ORDERS_MULTIITEM_VERIFY_KEY = 'aof_orders_multiitem_verify_v1'
 
-// Helper function to handle Supabase errors
-const handleSupabaseError = (error, operation) => {
+// Auto-sync helper - syncs record to cloud if configured
+// Uses dynamic imports to avoid circular dependency
+const autoSyncRecord = async (tableName, record) => {
+  // Debounce - don't block the main operation
+  setTimeout(async () => {
+    try {
+      // Dynamic imports to avoid circular dependency
+      const { isSupabaseConfigured, getCurrentUser } = await import('./supabaseClient')
+      const { pushToCloud } = await import('./syncEngine')
+
+      const configured = await isSupabaseConfigured()
+      if (!configured) return
+
+      const user = await getCurrentUser()
+      if (!user) return
+
+      // Add timestamp if missing
+      const recordWithTimestamp = {
+        ...record,
+        updatedAt: record.updatedAt || new Date().toISOString()
+      }
+
+      await pushToCloud(tableName, recordWithTimestamp, user.id)
+      console.log(`Auto-sync: Pushed ${tableName} to cloud`)
+    } catch (error) {
+      console.warn('Auto-sync failed:', error.message)
+    }
+  }, 100)
+}
+
+// Auto-sync delete helper
+const autoSyncDelete = async (tableName, recordId) => {
+  setTimeout(async () => {
+    try {
+      const { isSupabaseConfigured, getCurrentUser } = await import('./supabaseClient')
+      const { deleteFromCloud } = await import('./syncEngine')
+
+      const configured = await isSupabaseConfigured()
+      if (!configured) return
+
+      const user = await getCurrentUser()
+      if (!user) return
+
+      await deleteFromCloud(tableName, recordId, user.id)
+      console.log(`Auto-sync: Deleted ${tableName}/${recordId} from cloud`)
+    } catch (error) {
+      console.warn('Auto-sync delete failed:', error.message)
+    }
+  }, 100)
+}
+
+// Helper to handle Errors (now locally)
+const handleStorageError = (error, operation) => {
   console.error(`Error ${operation}:`, error)
   return null
 }
 
-// ===== DATA TRANSFORMATION FUNCTIONS =====
-
-// Transform order from frontend format (camelCase) to database format (snake_case)
-const transformOrderToDB = (order) => {
-  const firstItem = Array.isArray(order.orderItems) && order.orderItems.length > 0 ? order.orderItems[0] : null
-  return {
-    id: order.id,
-    customer_name: order.customerName || '',
-    address: order.address || null,
-    customer_phone: order.phone || null,
-    customer_whatsapp: order.whatsapp || null,
-    customer_email: order.email || null,
-    nearest_city: order.nearestCity || null,
-    district: order.district || null,
-    // Legacy single-item fields (derived from first order item when present)
-    category_id: order.categoryId || firstItem?.categoryId || null,
-    item_id: order.itemId || firstItem?.itemId || null,
-    custom_item_name: order.customItemName || firstItem?.customItemName || null,
-    quantity: order.quantity || firstItem?.quantity || 1,
-    unit_price: parseFloat(order.unitPrice || firstItem?.unitPrice || order.totalAmount || 0),
-    discount_type: order.discountType || null,
-    discount_value: parseFloat(order.discountValue || order.discount || 0),
-    total_amount: parseFloat(order.totalAmount || order.totalPrice || 0),
-    cod_amount: parseFloat(order.codAmount || 0),
-    advance_payment: parseFloat(order.advancePayment || 0),
-    delivery_charge: parseFloat(order.deliveryCharge ?? 400),
-    order_items: Array.isArray(order.orderItems)
-      ? order.orderItems.map(it => ({
-        categoryId: it.categoryId || null,
-        itemId: it.itemId || null,
-        customItemName: it.customItemName || null,
-        name: it.name || it.itemName || it.customItemName || null,
-        quantity: it.quantity ?? 0,
-        unitPrice: it.unitPrice ?? 0,
-        notes: it.notes || '',
-        image: it.image || null
-      }))
-      : [],
-    delivery_date: order.scheduledDeliveryDate || order.deliveryDate || null,
-    status: order.status || 'Pending',
-    payment_status: order.paymentStatus || 'Pending',
-    tracking_number: order.trackingNumber || null,
-    notes: order.notes || null,
-    created_date: order.createdDate || new Date().toISOString().split('T')[0],
-    order_date: order.orderDate || null,
-    dispatch_date: order.dispatchDate || null,
-    order_source: order.orderSource || 'Ad',
-    courier_finance_status: order.courierFinanceStatus || null,
-    courier_invoice_no: order.courierInvoiceNo || null,
-    courier_invoice_ref: order.courierInvoiceRef || null,
-    payment_method: order.paymentMethod || 'COD'
-  }
-}
-
-// Transform order from database format (snake_case) to frontend format (camelCase)
-const transformOrderFromDB = (order) => {
-  const normalizedOrderItemsRaw = (() => {
-    const raw = order.order_items
-    if (Array.isArray(raw)) return raw
-    if (typeof raw === 'string') {
-      try {
-        const parsed = JSON.parse(raw)
-        return Array.isArray(parsed) ? parsed : []
-      } catch {
-        return []
-      }
-    }
-    // Some DB/clients can return jsonb as object; treat non-array as empty
-    return []
-  })()
-
-  const orderItems = normalizedOrderItemsRaw.length > 0
-    ? normalizedOrderItemsRaw.map(it => ({
-      categoryId: it.categoryId || null,
-      itemId: it.itemId || null,
-      customItemName: it.customItemName || null,
-      name: it.name || it.itemName || it.customItemName || null,
-      quantity: it.quantity ?? 0,
-      unitPrice: it.unitPrice ?? 0,
-      notes: it.notes || '',
-      image: it.image || null
-    }))
-    : [{
-      categoryId: order.category_id || null,
-      itemId: order.item_id || null,
-      customItemName: order.custom_item_name || null,
-      name: order.custom_item_name || null,
-      quantity: order.quantity || 1,
-      unitPrice: order.unit_price || 0,
-      notes: ''
-    }]
-
-  return {
-    id: order.id,
-    customerName: order.customer_name || '',
-    address: order.address || '',
-    phone: order.customer_phone || '',
-    whatsapp: order.customer_whatsapp || order.customer_phone || '',
-    email: order.customer_email || '',
-    nearestCity: order.nearest_city || '',
-    district: order.district || '',
-    categoryId: order.category_id || null,
-    itemId: order.item_id || null,
-    customItemName: order.custom_item_name || null,
-    quantity: order.quantity || 1,
-    unitPrice: order.unit_price || 0,
-    deliveryCharge: order.delivery_charge ?? 400,
-    scheduledDeliveryDate: order.delivery_date || null,
-    deliveryDate: order.delivery_date || null, // Keeping for backward compatibility temporarily
-    orderItems,
-    discountType: order.discount_type || null,
-    discountValue: order.discount_value || 0,
-    discount: order.discount_value || 0, // Alias for compatibility
-    totalAmount: order.total_amount || 0,
-    totalPrice: order.total_amount || 0, // Alias for compatibility
-    codAmount: order.cod_amount || 0,
-    status: order.status || 'Pending',
-    paymentStatus: order.payment_status || 'Pending',
-    trackingNumber: order.tracking_number || null,
-    notes: order.notes || null,
-    createdDate: order.created_date || new Date().toISOString().split('T')[0],
-    orderDate: order.order_date || null,
-    dispatchDate: order.dispatch_date || null,
-    orderSource: order.order_source || 'Ad',
-    advancePayment: order.advance_payment || 0,
-    courierFinanceStatus: order.courier_finance_status || null,
-    courierInvoiceNo: order.courier_invoice_no || null,
-    courierInvoiceRef: order.courier_invoice_ref || null,
-    paymentMethod: order.payment_method || 'COD'
-  }
-}
 
 
 // ===== ORDERS =====
 
 export const getOrders = async () => {
   try {
-    const { data, error } = await supabase
-      .from('orders')
-      .select('*')
-      .order('created_date', { ascending: false })
+    // Fetch all orders from Dexie, ordered by createdDate descending
+    const data = await db.orders.orderBy('createdDate').reverse().toArray()
 
-    if (error) {
-      console.error('Error fetching orders:', error)
-      return []
-    }
-
-    // Transform from database format to frontend format
-    const transformed = (data || []).map(transformOrderFromDB)
-    console.log(`storage: getOrders - Fetched ${data?.length} rows, transformed into ${transformed.length} orders.`)
-    return transformed
+    // DECISION: We will store frontend-ready (camelCase) objects in Dexie.
+    // So we don't need `transformOrderFromDB` if we save it clean.
+    // The data fetched from Dexie should already be in the desired camelCase format.
+    console.log(`storage: getOrders - Fetched ${data?.length} orders.`)
+    return data || []
   } catch (error) {
     console.error('Error reading orders:', error)
     return []
@@ -174,9 +88,7 @@ export const getOrders = async () => {
 
 export const saveOrders = async (orders) => {
   try {
-    // De-duplicate by id to avoid Postgres upsert error:
-    // "ON CONFLICT DO UPDATE command cannot affect row a second time" (code 21000)
-    // Keep the last occurrence for each id.
+    // De-duplicate by id to avoid issues with bulkPut
     const dedupedOrders = (() => {
       const map = new Map()
         ; (orders || []).forEach(o => {
@@ -185,19 +97,9 @@ export const saveOrders = async (orders) => {
         })
       return Array.from(map.values())
     })()
-    const multiItemOrderFromUI = dedupedOrders.find(o => Array.isArray(o.orderItems) && o.orderItems.length > 1)
 
-    // Get all existing orders from database
-    const { data: existingOrders, error: fetchError } = await supabase
-      .from('orders')
-      .select('id')
-
-    if (fetchError) {
-      console.error('Error fetching existing orders:', fetchError)
-      return false
-    }
-
-    const existingOrderIds = new Set((existingOrders || []).map(o => o.id))
+    // Get all existing order IDs from Dexie
+    const existingOrderIds = new Set(await db.orders.toCollection().primaryKeys())
     const newOrderIds = new Set((dedupedOrders || []).map(o => o.id))
 
     // Find orders to delete (exist in DB but not in new array)
@@ -205,320 +107,26 @@ export const saveOrders = async (orders) => {
 
     // Delete orders that are no longer in the array
     if (ordersToDelete.length > 0) {
-      const { error: deleteError } = await supabase
-        .from('orders')
-        .delete()
-        .in('id', ordersToDelete)
-
-      if (deleteError) {
-        console.error('Error deleting orders:', deleteError)
-        return false
+      await db.orders.bulkDelete(ordersToDelete)
+      // Auto-sync deletions
+      for (const id of ordersToDelete) {
+        autoSyncDelete('orders', id)
       }
     }
 
     if (!dedupedOrders || dedupedOrders.length === 0) {
-      // All orders deleted
+      // All orders deleted or no orders to save
       return true
     }
 
-    // Transform orders to database format
-    const dbOrders = dedupedOrders.map(transformOrderToDB)
+    // Store directly in Dexie
+    await db.orders.bulkPut(dedupedOrders)
 
-    const stripFields = (row, fieldsToStrip) => {
-      const copy = { ...row }
-      for (const f of fieldsToStrip) delete copy[f]
-      return copy
+    // Auto-sync: sync each order to cloud (debounced by syncEngine)
+    for (const order of dedupedOrders) {
+      autoSyncRecord('orders', order)
     }
 
-    // Compat levels:
-    // - datesOnly: remove date fields (most common mismatch)
-    // - datesNoItems: remove date fields + multi-item fields (older schema)
-    // - datesSource: remove date fields + order_source
-    // - datesSourceNoItems: remove date fields + order_source + multi-item fields
-    const compatModes = {
-      datesOnly: ['order_date', 'dispatch_date', 'delivery_date', 'advance_payment', 'payment_method'],
-      datesNoItems: ['order_date', 'dispatch_date', 'delivery_date', 'order_items', 'delivery_charge', 'advance_payment', 'payment_method'],
-      datesSource: ['order_date', 'dispatch_date', 'delivery_date', 'order_source', 'advance_payment', 'payment_method'],
-      datesSourceNoItems: ['order_date', 'dispatch_date', 'delivery_date', 'order_source', 'order_items', 'delivery_charge', 'advance_payment', 'payment_method']
-    }
-
-    const getCachedSchemaMode = () => {
-      try {
-        const raw = localStorage.getItem(ORDERS_SCHEMA_CACHE_KEY)
-        if (!raw) return null
-        const parsed = JSON.parse(raw)
-        if (parsed?.mode && compatModes[parsed.mode]) return parsed.mode
-        return null
-      } catch {
-        return null
-      }
-    }
-
-    const cacheSchemaMode = (mode) => {
-      try {
-        localStorage.setItem(ORDERS_SCHEMA_CACHE_KEY, JSON.stringify({ mode, at: Date.now() }))
-      } catch {
-        // ignore
-      }
-    }
-
-    const shouldAlertSchema = () => {
-      // Avoid spamming the same schema alert on every save
-      try {
-        const raw = localStorage.getItem(ORDERS_SCHEMA_CACHE_KEY)
-        if (!raw) return true
-        const parsed = JSON.parse(raw)
-        // If we already cached a missing schema mode, don't keep alerting each save
-        return !parsed?.mode
-      } catch {
-        return true
-      }
-    }
-
-    // Use upsert to insert or update remaining orders
-    const tryUpsert = async (rows) => {
-      return await supabase.from('orders').upsert(rows, { onConflict: 'id' })
-    }
-
-    const verifyMultiItemsPersisted = async (savedOrderId) => {
-      if (!savedOrderId) return
-      try {
-        const { data, error: verifyError } = await supabase
-          .from('orders')
-          .select('id, order_items, delivery_charge')
-          .eq('id', savedOrderId)
-          .single()
-        if (verifyError) {
-          console.warn('Multi-item verify failed (could not read saved order):', verifyError)
-          return
-        }
-        const items = data?.order_items
-        const ok = Array.isArray(items) && items.length > 1
-        if (!ok) {
-          console.warn(
-            `Order #${savedOrderId} saved, but multiple items were NOT stored in Supabase.\n\n` +
-            `Stored items count: ${Array.isArray(items) ? items.length : 0}\n\n` +
-            'This means the save request is still falling back and stripping order_items.\n\n' +
-            'Fix steps:\n' +
-            '1) Supabase Dashboard → Settings → API → Reload schema cache\n' +
-            '2) Hard refresh the app (Ctrl+F5)\n' +
-            '3) Create a NEW multi-item order and re-check.\n\n' +
-            'If it still happens, we need to inspect the exact payload being saved.'
-          )
-        }
-      } catch (e) {
-        console.warn('Multi-item verify failed (unexpected):', e)
-      }
-    }
-
-    const clearCachedSchemaMode = () => {
-      try { localStorage.removeItem(ORDERS_SCHEMA_CACHE_KEY) } catch { /* ignore */ }
-    }
-
-    // If we already know DB is missing newer columns, try to re-probe full payload
-    // (users often migrate later; we should stop stripping fields once DB supports them).
-    const cachedMode = getCachedSchemaMode()
-    if (cachedMode) {
-      const needsDates = Boolean(
-        multiItemOrderFromUI?.deliveryDate ||
-        multiItemOrderFromUI?.dispatchDate ||
-        dedupedOrders.some(o => o?.deliveryDate || o?.dispatchDate)
-      )
-
-      const shouldProbeFull = needsDates || cachedMode !== 'datesOnly'
-      if (shouldProbeFull) {
-        const probeKey = `${ORDERS_SCHEMA_CACHE_KEY}__full_probe_done_v1`
-        let alreadyProbed = false
-        try { alreadyProbed = sessionStorage.getItem(probeKey) === '1' } catch { alreadyProbed = false }
-
-        if (!alreadyProbed) {
-          const { error: fullProbeErr } = await tryUpsert(dbOrders)
-          try { sessionStorage.setItem(probeKey, '1') } catch { /* ignore */ }
-
-          if (!fullProbeErr) {
-            // DB accepts full payload now; stop stripping and clear cache.
-            console.log('storage: DB accepts full payload. Clearing cached compat mode.')
-            clearCachedSchemaMode()
-            if (multiItemOrderFromUI) {
-              await verifyMultiItemsPersisted(multiItemOrderFromUI.id)
-            }
-            return true
-          }
-          console.warn('Full payload probe failed; keeping cached compat mode:', fullProbeErr)
-        }
-      }
-
-      // If cache says we must drop order_items, re-probe once per page load:
-      // many users add DB columns later, but localStorage keeps the old strict mode.
-      const cacheRequiresDroppingItems = cachedMode === 'datesNoItems' || cachedMode === 'datesSourceNoItems'
-      const hasMultiItemOrder = dbOrders.some(o => Array.isArray(o.order_items) && o.order_items.length > 0)
-
-      if (cacheRequiresDroppingItems && hasMultiItemOrder && multiItemOrderFromUI) {
-        // Always try a less-destructive mode (keep order_items) for multi-item orders.
-        // If it succeeds, upgrade cache immediately.
-        const probeMode = cachedMode === 'datesSourceNoItems' ? 'datesSource' : 'datesOnly'
-        const probeRows = dbOrders.map(r => stripFields(r, compatModes[probeMode]))
-        const { error: probeErr } = await tryUpsert(probeRows)
-        if (!probeErr) {
-          cacheSchemaMode(probeMode)
-          await verifyMultiItemsPersisted(multiItemOrderFromUI.id)
-          return true
-        }
-        console.warn('Schema probe (keep order_items) failed; using cached compat mode:', probeErr)
-      }
-
-      const compatRows = dbOrders.map(r => stripFields(r, compatModes[cachedMode]))
-      const { error: compatErr } = await tryUpsert(compatRows)
-      if (compatErr) {
-        console.error('Error saving orders (cached compat mode):', compatErr)
-        return false
-      }
-      if (multiItemOrderFromUI) {
-        if (cacheRequiresDroppingItems) {
-          console.warn(
-            `Order #${multiItemOrderFromUI.id} saved, but your app had to drop multi-item fields to match the current DB schema.\n\n` +
-            `Result: order_items will be saved as [] (so after refresh you will see only one item).\n\n` +
-            `Fix: Supabase must accept order_items and delivery_charge in the upsert payload. If you already added the columns, reload schema cache and try again.`
-          )
-        } else {
-          await verifyMultiItemsPersisted(multiItemOrderFromUI.id)
-        }
-      }
-      return true
-    }
-
-    // 1) Try full payload (includes newer fields like order_date/dispatch_date/order_source)
-    const { error } = await tryUpsert(dbOrders)
-
-    if (error) {
-      console.error('Error saving orders:', error)
-      console.error('Orders data:', dbOrders)
-
-      // Duplicate IDs in the upsert payload
-      if (error.code === '21000' || error.message?.includes('cannot affect row a second time')) {
-        console.warn(
-          'Cannot save orders because there are duplicate Order Numbers (IDs) in your current data.\n\n' +
-          'Fix: search Orders for the duplicated order number and change one of them to a unique number, then try again.'
-        )
-        return false
-      }
-
-      // 2) Retry by removing only date fields first (keeps order_items so multi-item orders persist)
-      const dbOrdersWithoutDates = dbOrders.map(order => stripFields(order, compatModes.datesOnly))
-      const { error: retryDatesError } = await tryUpsert(dbOrdersWithoutDates)
-
-      if (!retryDatesError) {
-        cacheSchemaMode('datesOnly')
-        console.warn('Saved orders without order_date/dispatch_date. Please run migration SQL to add them.')
-        if (shouldAlertSchema()) {
-          console.warn(
-            'Orders saved, but your database is missing some newer columns.\n\n' +
-            'Please run this in Supabase SQL Editor:\n\n' +
-            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_date DATE;\n" +
-            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS dispatch_date DATE;\n" +
-            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_date DATE;\n" +
-            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_method TEXT DEFAULT 'COD';\n"
-          )
-        }
-        if (multiItemOrderFromUI) {
-          await verifyMultiItemsPersisted(multiItemOrderFromUI.id)
-        }
-        return true
-      }
-
-      console.error('Error saving orders (retry without date fields):', retryDatesError)
-
-      // 3) Retry removing date fields + multi-item fields (for older schemas missing order_items/delivery_charge)
-      const dbOrdersWithoutDatesAndItems = dbOrders.map(order => stripFields(order, compatModes.datesNoItems))
-      const { error: retryItemsError } = await tryUpsert(dbOrdersWithoutDatesAndItems)
-
-      if (!retryItemsError) {
-        cacheSchemaMode('datesNoItems')
-        console.warn('Saved orders without date/item fields. Please run migration SQL to add them.')
-        if (shouldAlertSchema()) {
-          console.warn(
-            'Orders saved, but your database is missing some newer columns.\n\n' +
-            'Please run this in Supabase SQL Editor:\n\n' +
-            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_date DATE;\n" +
-            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS dispatch_date DATE;\n" +
-            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_date DATE;\n" +
-            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_items JSONB NOT NULL DEFAULT '[]'::jsonb;\n" +
-            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_charge DECIMAL(10,2) DEFAULT 400;\n" +
-            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_method TEXT DEFAULT 'COD';\n"
-          )
-        }
-        return true
-      }
-
-      console.error('Error saving orders (retry without date fields + item fields):', retryItemsError)
-
-      // 4) Retry without date fields + order_source (older DBs may not have this either)
-      const dbOrdersWithoutDatesAndSource = dbOrders.map(order => stripFields(order, compatModes.datesSource))
-      const { error: retrySourceError } = await tryUpsert(dbOrdersWithoutDatesAndSource)
-
-      if (!retrySourceError) {
-        cacheSchemaMode('datesSource')
-        console.warn('Saved orders without order_date/dispatch_date/order_source. Please run migration SQL to add them.')
-        if (shouldAlertSchema()) {
-          console.warn(
-            'Orders saved, but your database is missing some newer columns.\n\n' +
-            'Please run this in Supabase SQL Editor:\n\n' +
-            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_date DATE;\n" +
-            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS dispatch_date DATE;\n" +
-            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_date DATE;\n" +
-            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_source TEXT DEFAULT 'Ad';\n" +
-            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_method TEXT DEFAULT 'COD';\n"
-          )
-        }
-        if (multiItemOrderFromUI) {
-          await verifyMultiItemsPersisted(multiItemOrderFromUI.id)
-        }
-        return true
-      }
-
-      console.error('Error saving orders (retry without date fields + order_source):', retrySourceError)
-
-      // 5) Retry without date fields + order_source + item fields
-      const dbOrdersWithoutDatesSourceAndItems = dbOrders.map(order => stripFields(order, compatModes.datesSourceNoItems))
-      const { error: retrySourceItemsError } = await tryUpsert(dbOrdersWithoutDatesSourceAndItems)
-
-      if (!retrySourceItemsError) {
-        cacheSchemaMode('datesSourceNoItems')
-        console.warn('Saved orders without date/source/item fields. Please run migration SQL to add them.')
-        if (shouldAlertSchema()) {
-          console.warn(
-            'Orders saved, but your database is missing some newer columns.\n\n' +
-            'Please run this in Supabase SQL Editor:\n\n' +
-            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_date DATE;\n" +
-            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS dispatch_date DATE;\n" +
-            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_date DATE;\n" +
-            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_source TEXT DEFAULT 'Ad';\n" +
-            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_items JSONB NOT NULL DEFAULT '[]'::jsonb;\n" +
-            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_charge DECIMAL(10,2) DEFAULT 400;\n" +
-            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_method TEXT DEFAULT 'COD';\n"
-          )
-        }
-        return true
-      }
-
-      console.error('Error saving orders (retry without date fields + order_source + item fields):', retrySourceItemsError)
-
-      // If we still fail, surface a single actionable message
-      console.warn(
-        'Failed to save orders due to a database schema mismatch.\n\n' +
-        'Please ensure these columns exist in Supabase:\n' +
-        '- order_date (DATE)\n' +
-        '- dispatch_date (DATE)\n' +
-        '- delivery_date (DATE)\n' +
-        "- order_source (TEXT DEFAULT 'Ad')\n\n" +
-        'After running the migration, refresh the app and try again.'
-      )
-      return false
-    }
-
-    if (multiItemOrderFromUI) {
-      await verifyMultiItemsPersisted(multiItemOrderFromUI.id)
-    }
     return true
   } catch (error) {
     console.error('Error saving orders:', error)
@@ -526,38 +134,29 @@ export const saveOrders = async (orders) => {
   }
 }
 
+export const deleteOrder = async (orderId) => {
+  try {
+    await db.orders.delete(orderId)
+    // Auto-sync deletion
+    autoSyncDelete('orders', orderId)
+    return true
+  } catch (error) {
+    console.error('Error deleting order:', error)
+    return false
+  }
+}
+
+
 
 // ===== EXPENSES =====
 
 export const getExpenses = async () => {
   try {
-    const { data, error } = await supabase
-      .from('expenses')
-      .select('*')
-      .order('date', { ascending: false })
+    const data = await db.expenses.orderBy('date').reverse().toArray()
 
-    if (error) {
-      console.error('Error fetching expenses:', error)
-      return []
-    }
-
-    // Transform from database format to frontend format
-    const transformed = (data || []).map(expense => ({
-      id: expense.id,
-      description: expense.description || expense.item || '',
-      item: expense.item || expense.description || '',
-      category: expense.category || '',
-      quantity: expense.quantity || 0,
-      unitCost: expense.unit_cost || 0,
-      amount: expense.amount || expense.total || 0,
-      inventoryItemId: expense.inventory_item_id || null,
-      total: expense.total || expense.amount || 0,
-      date: expense.date || new Date().toISOString().split('T')[0],
-      payment_method: expense.payment_method || null,
-      notes: expense.notes || null,
-    }))
+    // Data stored in Dexie should already be in camelCase, so no transformation needed.
     console.log(`storage: getExpenses - Fetched ${data?.length} rows.`)
-    return transformed
+    return data || []
   } catch (error) {
     console.error('Error reading expenses:', error)
     return []
@@ -566,17 +165,8 @@ export const getExpenses = async () => {
 
 export const saveExpenses = async (expenses) => {
   try {
-    // Get all existing expenses from database
-    const { data: existingExpenses, error: fetchError } = await supabase
-      .from('expenses')
-      .select('id')
-
-    if (fetchError) {
-      console.error('Error fetching existing expenses:', fetchError)
-      return false
-    }
-
-    const existingExpenseIds = new Set((existingExpenses || []).map(e => e.id))
+    // Get all existing expense IDs from Dexie
+    const existingExpenseIds = new Set(await db.expenses.toCollection().primaryKeys())
     const newExpenseIds = new Set((expenses || []).map(e => e.id))
 
     // Find expenses to delete (exist in DB but not in new array)
@@ -584,74 +174,24 @@ export const saveExpenses = async (expenses) => {
 
     // Delete expenses that are no longer in the array
     if (expensesToDelete.length > 0) {
-      const { error: deleteError } = await supabase
-        .from('expenses')
-        .delete()
-        .in('id', expensesToDelete)
-
-      if (deleteError) {
-        console.error('Error deleting expenses:', deleteError)
-        return false
+      await db.expenses.bulkDelete(expensesToDelete)
+      // Auto-sync deletions
+      for (const id of expensesToDelete) {
+        autoSyncDelete('expenses', id)
       }
     }
 
     if (!expenses || expenses.length === 0) {
-      // All expenses deleted
+      // All expenses deleted or no expenses to save
       return true
     }
 
-    // First, try to save with all new fields
-    const dbExpenses = expenses.map(expense => ({
-      id: expense.id,
-      description: expense.description || expense.item || '',
-      item: expense.item || expense.description || null,
-      category: expense.category || null,
-      quantity: expense.quantity ? parseFloat(expense.quantity) : null,
-      unit_cost: expense.unitCost ? parseFloat(expense.unitCost) : null,
-      amount: parseFloat(expense.amount || expense.total || 0),
-      total: expense.total ? parseFloat(expense.total) : parseFloat(expense.amount || 0),
-      date: expense.date || new Date().toISOString().split('T')[0],
-      payment_method: expense.payment_method || null,
-      notes: expense.notes || null,
-      inventory_item_id: expense.inventoryItemId || null,
-    }))
+    // Store directly in Dexie
+    await db.expenses.bulkPut(expenses)
 
-    let { error } = await supabase
-      .from('expenses')
-      .upsert(dbExpenses, { onConflict: 'id' })
-
-    // If error is about missing columns, fall back to basic fields
-    if (error && (error.message?.includes('column') || error.code === '42703' || error.code === 'PGRST204' || error.details?.includes('column'))) {
-      console.warn('New expense columns not found in database. Saving with basic fields only.')
-      console.warn('Please run the migration SQL: update-expenses-schema.sql')
-
-      // Save with only the basic fields that definitely exist
-      const basicExpenses = expenses.map(expense => ({
-        id: expense.id,
-        description: expense.description || expense.item || '',
-        category: expense.category || '',
-        amount: parseFloat(expense.amount || expense.total || 0),
-        date: expense.date || new Date().toISOString().split('T')[0]
-      }))
-
-      const { error: basicError } = await supabase
-        .from('expenses')
-        .upsert(basicExpenses, { onConflict: 'id' })
-
-      if (basicError) {
-        console.error('Error saving expenses (basic fields):', basicError)
-        console.error('Expense data:', basicExpenses)
-        return false
-      }
-
-      return true
-    }
-
-    if (error) {
-      console.error('Error saving expenses:', error)
-      console.error('Error details:', error.message, error.code, error.details)
-      console.error('Expense data:', dbExpenses)
-      return false
+    // Auto-sync each expense
+    for (const expense of expenses) {
+      autoSyncRecord('expenses', expense)
     }
 
     return true
@@ -661,17 +201,23 @@ export const saveExpenses = async (expenses) => {
   }
 }
 
+export const deleteExpense = async (expenseId) => {
+  try {
+    await db.expenses.delete(expenseId)
+    // Auto-sync deletion
+    autoSyncDelete('expenses', expenseId)
+    return true
+  } catch (error) {
+    console.error('Error deleting expense:', error)
+    return false
+  }
+}
+
 // ===== SETTINGS =====
 
-export const getSettings = async () => {
-  try {
-    const { data, error } = await supabase
-      .from('settings')
-      .select('data')
-      .eq('id', 'settings')
-      .single()
 
-    const defaultWhatsappTemplate = `Order No: {{order_id}}
+export const getSettings = async () => {
+  const defaultWhatsappTemplate = `Order No: {{order_id}}
 Tracking number: {{tracking_number}}
 
 අද දින ඔබගේ ඇනවුම කුරියර් එකට බාරදෙන අතර ඔවුන් වැඩ කරන දින 4ක් ඇතුලත ඔබගේ ඇනවුම ඔබට ලබා දීමට කටයුතු කරන බැවින් හෙට දිනයේ සිට එම කුරියර් සේවාව මගින් ඔබට ඇමතුම් ලැබුනහොත් එවාට ප්‍රතිචාර දක්වන මෙන් ඉල්ලා සිටිමු. යම්කිසි හේතුවක් නිසා ප්‍රතිචාර දැක්වීමට නොහැකි වුවහොත් එම දුරකතන අංකයට ඔබ විසින් ඇමතුමක් ලබාගෙන ඔවුන් හා සම්බන්ද වී ඔබගේ ඇනවුම ගෙන්වාගන්න. නැවත ඔවුන්ම ඇමතුමක් ලබා ගන්නා තෙක් රැදි නොසිටින්න. මෙමගින් ඔබගේ ඇනවුම ප්‍රමාදවලින් තොරව ලබා ගත හැකිවේ. 
@@ -692,26 +238,36 @@ Tracking number: {{tracking_number}}
 
 මෙහියම්කිසි ගැටලුවක් ඇතිනම් විමසීමට කාරුණික වන්න.`
 
-    const defaultSettings = {
-      orderNumberConfig: {
-        enabled: false,
-        startingNumber: 1000,
-        configured: false
-      },
-      whatsappTemplates: {
-        viewOrder: defaultWhatsappTemplate,
-        quickAction: defaultWhatsappTemplate
-      }
+  const defaultSettings = {
+    businessName: 'AOF Biz - Management App',
+    businessTagline: 'From Chaos To Clarity',
+    businessLogo: null,
+    orderNumberConfig: {
+      enabled: false,
+      startingNumber: 1000,
+      configured: false
+    },
+    whatsappTemplates: {
+      viewOrder: defaultWhatsappTemplate,
+      quickAction: defaultWhatsappTemplate
     }
+  }
 
-    if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
-      console.error('Error fetching settings:', error)
-      return defaultSettings
-    }
+  try {
+    const data = await db.settings.get('settings')
 
     if (data && data.data) {
       // Merge defaults for missing keys
-      const merged = { ...defaultSettings, ...data.data }
+      let merged = { ...defaultSettings, ...data.data }
+
+      // Handle blank values specifically (ensure defaults if empty string)
+      if (!merged.businessName || merged.businessName.trim() === '') {
+        merged.businessName = defaultSettings.businessName
+      }
+      if (!merged.businessTagline || merged.businessTagline.trim() === '') {
+        merged.businessTagline = defaultSettings.businessTagline
+      }
+
       if (!data.data.whatsappTemplates) {
         merged.whatsappTemplates = defaultSettings.whatsappTemplates
       }
@@ -739,19 +295,12 @@ Tracking number: {{tracking_number}}
 
 export const saveSettings = async (settings) => {
   try {
-    const { error } = await supabase
-      .from('settings')
-      .upsert({
-        id: 'settings',
-        data: settings,
-        updated_at: new Date().toISOString()
-      })
-
-    if (error) {
-      console.error('Error saving settings:', error)
-      return false
-    }
-
+    const s = { ...settings } // ensure plain obj
+    await db.settings.put({
+      id: 'settings',
+      data: s,
+      updatedAt: new Date().toISOString()
+    })
     return true
   } catch (error) {
     console.error('Error saving settings:', error)
@@ -763,17 +312,7 @@ export const saveSettings = async (settings) => {
 
 export const getOrderCounter = async () => {
   try {
-    const { data, error } = await supabase
-      .from('order_counter')
-      .select('value')
-      .eq('id', 'counter')
-      .single()
-
-    if (error && error.code !== 'PGRST116') {
-      console.error('Error fetching order counter:', error)
-      return null
-    }
-
+    const data = await db.orderCounter.get('counter')
     return data?.value ?? null
   } catch (error) {
     console.error('Error reading order counter:', error)
@@ -783,19 +322,11 @@ export const getOrderCounter = async () => {
 
 export const saveOrderCounter = async (counter) => {
   try {
-    const { error } = await supabase
-      .from('order_counter')
-      .upsert({
-        id: 'counter',
-        value: counter,
-        updated_at: new Date().toISOString()
-      })
-
-    if (error) {
-      console.error('Error saving order counter:', error)
-      return false
-    }
-
+    await db.orderCounter.put({
+      id: 'counter',
+      value: counter,
+      updatedAt: new Date().toISOString()
+    })
     return true
   } catch (error) {
     console.error('Error saving order counter:', error)
@@ -806,51 +337,13 @@ export const saveOrderCounter = async (counter) => {
 
 // ===== INVENTORY =====
 
-// Transform inventory item from frontend format to database format
-const transformInventoryToDB = (item) => {
-  return {
-    id: item.id,
-    item_name: item.itemName || '',
-    category: item.category || null,
-    current_stock: parseFloat(item.currentStock || 0),
-    reorder_level: parseFloat(item.reorderLevel || 0),
-    unit_cost: parseFloat(item.unitCost || 0),
-    supplier: item.supplier || null,
-    created_at: item.createdAt || new Date().toISOString(),
-    updated_at: new Date().toISOString()
-  }
-}
-
-// Transform inventory item from database format to frontend format
-const transformInventoryFromDB = (item) => {
-  return {
-    id: item.id,
-    itemName: item.item_name || '',
-    category: item.category || '',
-    currentStock: parseFloat(item.current_stock || 0),
-    reorderLevel: parseFloat(item.reorder_level || 0),
-    unitCost: parseFloat(item.unit_cost || 0),
-    supplier: item.supplier || '',
-    createdAt: item.created_at || new Date().toISOString(),
-    updatedAt: item.updated_at || new Date().toISOString()
-  }
-}
-
 export const getInventory = async () => {
   try {
-    const { data, error } = await supabase
-      .from('inventory')
-      .select('*')
-      .order('item_name', { ascending: true })
+    const data = await db.inventory.orderBy('itemName').toArray()
 
-    if (error) {
-      console.error('Error fetching inventory:', error)
-      return []
-    }
-
-    const transformed = (data || []).map(transformInventoryFromDB)
+    // Data stored in Dexie should already be in camelCase, so no transformation needed.
     console.log(`storage: getInventory - Fetched ${data?.length} rows.`)
-    return transformed
+    return data || []
   } catch (error) {
     console.error('Error reading inventory:', error)
     return []
@@ -859,17 +352,8 @@ export const getInventory = async () => {
 
 export const saveInventory = async (inventory) => {
   try {
-    // Get all existing inventory items from database
-    const { data: existingInventory, error: fetchError } = await supabase
-      .from('inventory')
-      .select('id')
-
-    if (fetchError) {
-      console.error('Error fetching existing inventory:', fetchError)
-      return false
-    }
-
-    const existingIds = new Set((existingInventory || []).map(item => item.id))
+    // Get all existing inventory item IDs from Dexie
+    const existingIds = new Set(await db.inventory.toCollection().primaryKeys())
     const newIds = new Set((inventory || []).map(item => item.id))
 
     // Find items to delete (exist in DB but not in new array)
@@ -877,33 +361,15 @@ export const saveInventory = async (inventory) => {
 
     // Delete items that are no longer in the array
     if (itemsToDelete.length > 0) {
-      const { error: deleteError } = await supabase
-        .from('inventory')
-        .delete()
-        .in('id', itemsToDelete)
-
-      if (deleteError) {
-        console.error('Error deleting inventory items:', deleteError)
-        return false
-      }
+      await db.inventory.bulkDelete(itemsToDelete)
     }
 
     if (!inventory || inventory.length === 0) {
       return true
     }
 
-    // Transform and upsert remaining items
-    const dbInventory = inventory.map(transformInventoryToDB)
-
-    const { error } = await supabase
-      .from('inventory')
-      .upsert(dbInventory, { onConflict: 'id' })
-
-    if (error) {
-      console.error('Error saving inventory:', error)
-      return false
-    }
-
+    // Store directly in Dexie. No need for Supabase-specific transformations.
+    await db.inventory.bulkPut(inventory)
     return true
   } catch (error) {
     console.error('Error saving inventory:', error)
@@ -911,18 +377,19 @@ export const saveInventory = async (inventory) => {
   }
 }
 
+export const deleteInventoryItem = async (itemId) => {
+  try {
+    await db.inventory.delete(itemId)
+    return true
+  } catch (error) {
+    console.error('Error deleting inventory item:', error)
+    return false
+  }
+}
+
 export const getInventoryCategories = async () => {
   try {
-    const { data, error } = await supabase
-      .from('products')
-      .select('data')
-      .eq('id', 'inventory_categories')
-      .single()
-
-    if (error && error.code !== 'PGRST116') {
-      console.error('Error fetching inventory categories:', error)
-      return { categories: [] }
-    }
+    const data = await db.products.get('inventory_categories')
 
     if (data && data.data && data.data.categories) {
       return data.data
@@ -939,19 +406,11 @@ export const getInventoryCategories = async () => {
 
 export const saveInventoryCategories = async (inventoryCategories) => {
   try {
-    const { error } = await supabase
-      .from('products')
-      .upsert({
-        id: 'inventory_categories',
-        data: inventoryCategories,
-        updated_at: new Date().toISOString()
-      })
-
-    if (error) {
-      console.error('Error saving inventory categories:', error)
-      return false
-    }
-
+    await db.products.put({
+      id: 'inventory_categories',
+      data: inventoryCategories,
+      updatedAt: new Date().toISOString()
+    })
     return true
   } catch (error) {
     console.error('Error saving inventory categories:', error)
@@ -963,16 +422,7 @@ export const saveInventoryCategories = async (inventoryCategories) => {
 
 export const getExpenseCategories = async () => {
   try {
-    const { data, error } = await supabase
-      .from('products')
-      .select('data')
-      .eq('id', 'expense_categories')
-      .single()
-
-    if (error && error.code !== 'PGRST116') {
-      console.error('Error fetching expense categories:', error)
-      return { categories: [] }
-    }
+    const data = await db.products.get('expense_categories')
 
     if (data && data.data && data.data.categories) {
       // Backward compatible normalization: ensure each category has an `items` array
@@ -996,19 +446,11 @@ export const getExpenseCategories = async () => {
 
 export const saveExpenseCategories = async (expenseCategories) => {
   try {
-    const { error } = await supabase
-      .from('products')
-      .upsert({
-        id: 'expense_categories',
-        data: expenseCategories,
-        updated_at: new Date().toISOString()
-      })
-
-    if (error) {
-      console.error('Error saving expense categories:', error)
-      return false
-    }
-
+    await db.products.put({
+      id: 'expense_categories',
+      data: expenseCategories,
+      updatedAt: new Date().toISOString()
+    })
     return true
   } catch (error) {
     console.error('Error saving expense categories:', error)
@@ -1020,27 +462,7 @@ export const saveExpenseCategories = async (expenseCategories) => {
 
 export const getOrderSources = async () => {
   try {
-    const { data, error } = await supabase
-      .from('order_sources')
-      .select('*')
-      .order('name', { ascending: true })
-
-    // If table doesn't exist yet, fall back to defaults (keeps app usable pre-migration)
-    if (error) {
-      try {
-        const alreadyWarned = localStorage.getItem(ORDER_SOURCES_WARNED_KEY) === '1'
-        if (!alreadyWarned) {
-          console.warn('Order sources table missing/unavailable, using defaults:', error)
-          localStorage.setItem(ORDER_SOURCES_WARNED_KEY, '1')
-        }
-      } catch {
-        console.warn('Order sources table missing/unavailable, using defaults:', error)
-      }
-      return [
-        { id: 'Ad', name: 'Ad' },
-        { id: 'Organic', name: 'Organic' }
-      ]
-    }
+    const data = await db.orderSources.orderBy('name').toArray()
 
     if (!data || data.length === 0) {
       // If empty, provide defaults but don't auto-write (avoids unexpected DB writes)
@@ -1066,42 +488,27 @@ export const getOrderSources = async () => {
 export const saveOrderSources = async (sources) => {
   try {
     if (!sources || sources.length === 0) {
-      const { error } = await supabase.from('order_sources').delete().neq('id', '')
-      return !error
+      // Clear all order sources if an empty array is passed
+      await db.orderSources.clear()
+      return true
     }
 
     // Delete removed ones (keeps DB exactly in sync with Settings list)
-    const { data: existing, error: fetchError } = await supabase.from('order_sources').select('id')
-    if (fetchError) {
-      console.error('Error fetching existing order sources:', fetchError)
-      return false
-    }
-
-    const existingIds = new Set((existing || []).map(r => r.id))
+    const existing = await db.orderSources.toCollection().primaryKeys()
+    const existingIds = new Set(existing)
     const newIds = new Set((sources || []).map(r => r.id))
     const toDelete = Array.from(existingIds).filter(id => !newIds.has(id))
     if (toDelete.length) {
-      const { error: delError } = await supabase.from('order_sources').delete().in('id', toDelete)
-      if (delError) {
-        console.error('Error deleting order sources:', delError)
-        return false
-      }
+      await db.orderSources.bulkDelete(toDelete)
     }
 
     const dbRows = sources.map(s => ({
       id: s.id,
       name: s.name,
-      updated_at: new Date().toISOString()
+      updatedAt: new Date().toISOString()
     }))
 
-    const { error } = await supabase
-      .from('order_sources')
-      .upsert(dbRows, { onConflict: 'id' })
-
-    if (error) {
-      console.error('Error saving order sources:', error)
-      return false
-    }
+    await db.orderSources.bulkPut(dbRows)
     return true
   } catch (error) {
     console.error('Error saving order sources:', error)
@@ -1113,18 +520,12 @@ export const saveOrderSources = async (sources) => {
 export const renameOrderSourceInOrders = async (oldName, newName) => {
   try {
     if (!oldName || !newName || oldName === newName) return true
-    const { error } = await supabase
-      .from('orders')
-      .update({ order_source: newName })
-      .eq('order_source', oldName)
-
-    if (error) {
-      console.warn('Error updating order_source in orders:', error)
-      return false
-    }
+    const ordersToUpdate = await db.orders.where('orderSource').equals(oldName).toArray()
+    const updatedOrders = ordersToUpdate.map(order => ({ ...order, orderSource: newName }))
+    await db.orders.bulkPut(updatedOrders)
     return true
   } catch (e) {
-    console.warn('Error updating order_source in orders:', e)
+    console.warn('Error updating orderSource in orders:', e)
     return false
   }
 }
@@ -1133,23 +534,10 @@ export const renameOrderSourceInOrders = async (oldName, newName) => {
 
 export const getTrackingNumbers = async () => {
   try {
-    const { data, error } = await supabase
-      .from('tracking_numbers')
-      .select('*')
-      .order('number', { ascending: true })
+    const data = await db.trackingNumbers.orderBy('number').toArray()
 
-    if (error) {
-      console.error('Error fetching tracking numbers:', error)
-      return []
-    }
-
-    // Transform to match expected format
-    return (data || []).map(tn => ({
-      id: tn.id,
-      number: tn.number,
-      status: tn.status,
-      assignedTo: tn.assigned_to
-    }))
+    // Data stored in Dexie should already be in camelCase, so no transformation needed.
+    return data || []
   } catch (error) {
     console.error('Error reading tracking numbers:', error)
     return []
@@ -1159,54 +547,30 @@ export const getTrackingNumbers = async () => {
 export const saveTrackingNumbers = async (trackingNumbers) => {
   try {
     // Get all existing tracking numbers to sync (delete removed ones)
-    const { data: existingData, error: fetchError } = await supabase
-      .from('tracking_numbers')
-      .select('id')
-
-    if (fetchError) {
-      console.error('Error fetching existing tracking numbers:', fetchError)
-      return false
-    }
-
-    const existingIds = new Set((existingData || []).map(tn => tn.id))
+    const existingIds = new Set(await db.trackingNumbers.toCollection().primaryKeys())
     const newIds = new Set((trackingNumbers || []).map(tn => tn.id || tn.number))
 
     // Find tracking numbers to delete
     const idsToDelete = Array.from(existingIds).filter(id => !newIds.has(id))
 
     if (idsToDelete.length > 0) {
-      const { error: deleteError } = await supabase
-        .from('tracking_numbers')
-        .delete()
-        .in('id', idsToDelete)
-
-      if (deleteError) {
-        console.error('Error deleting tracking numbers:', deleteError)
-        return false
-      }
+      await db.trackingNumbers.bulkDelete(idsToDelete)
     }
 
     if (!trackingNumbers || trackingNumbers.length === 0) {
       return true
     }
 
-    // Transform to database format
+    // Ensure IDs are present and store directly in Dexie
     const dbFormat = trackingNumbers.map(tn => ({
-      id: tn.id || tn.number,
+      id: tn.id || tn.number, // Ensure an ID exists for Dexie
       number: tn.number,
       status: tn.status || 'available',
-      assigned_to: tn.assignedTo || null
+      assignedTo: tn.assignedTo || null,
+      updatedAt: new Date().toISOString()
     }))
 
-    const { error } = await supabase
-      .from('tracking_numbers')
-      .upsert(dbFormat, { onConflict: 'id' })
-
-    if (error) {
-      console.error('Error saving tracking numbers:', error)
-      return false
-    }
-
+    await db.trackingNumbers.bulkPut(dbFormat)
     return true
   } catch (error) {
     console.error('Error saving tracking numbers:', error)
@@ -1218,16 +582,9 @@ export const saveTrackingNumbers = async (trackingNumbers) => {
 
 export const getProducts = async () => {
   try {
-    const { data, error } = await supabase
-      .from('products')
-      .select('data')
-      .eq('id', 'products')
-      .single()
+    const data = await db.products.get('products')
 
-    if (error && error.code !== 'PGRST116') {
-      console.error('Error fetching products:', error)
-      return null
-    }
+    const defaultProducts = getDefaultProducts()
 
     if (data && data.data && data.data.categories && data.data.categories.length > 0) {
       console.log(`storage: getProducts - Loaded ${data.data.categories.length} categories from DB.`)
@@ -1235,7 +592,6 @@ export const getProducts = async () => {
     }
 
     // Return default products if none exist
-    const defaultProducts = getDefaultProducts()
     await saveProducts(defaultProducts)
     return defaultProducts
   } catch (error) {
@@ -1247,19 +603,11 @@ export const getProducts = async () => {
 
 export const saveProducts = async (products) => {
   try {
-    const { error } = await supabase
-      .from('products')
-      .upsert({
-        id: 'products',
-        data: products,
-        updated_at: new Date().toISOString()
-      })
-
-    if (error) {
-      console.error('Error saving products:', error)
-      return false
-    }
-
+    await db.products.put({
+      id: 'products',
+      data: products,
+      updatedAt: new Date().toISOString()
+    })
     return true
   } catch (error) {
     console.error('Error saving products:', error)
@@ -1372,17 +720,13 @@ export const getAvailableTrackingNumbers = async (trackingNumbers = [], orders =
 // Mark tracking number as used
 export const markTrackingNumberAsUsed = async (trackingNumber, trackingNumbers = []) => {
   try {
-    // Update in Supabase
-    const { error } = await supabase
-      .from('tracking_numbers')
-      .update({
+    // Update in Dexie
+    const tnToUpdate = await db.trackingNumbers.get(trackingNumber)
+    if (tnToUpdate) {
+      await db.trackingNumbers.update(trackingNumber, {
         status: 'used',
-        updated_at: new Date().toISOString()
+        updatedAt: new Date().toISOString()
       })
-      .eq('number', trackingNumber)
-
-    if (error) {
-      console.error('Error updating tracking number:', error)
     }
 
     // Return updated local array
@@ -1423,42 +767,39 @@ export const calculateNextOrderNumber = (orders = []) => {
   }
 }
 
-export const calculateNextQuotationNumber = (quotations = []) => {
-  if (!quotations || quotations.length === 0) {
-    return '1'
-  }
 
-  const numericIds = quotations
-    .map(q => {
-      const id = parseInt(q.id, 10)
-      return isNaN(id) ? null : id
-    })
-    .filter(id => id !== null && id > 0)
-
-  if (numericIds.length > 0) {
-    const maxId = Math.max(...numericIds)
-    return (maxId + 1).toString()
-  } else {
-    return '1'
-  }
-}
 
 // ===== FILE EXPORT/IMPORT FUNCTIONS =====
 
 // Export all data to a JSON file
-export const exportAllData = async (orders, expenses, products, settings, trackingNumbers, orderCounter, inventory) => {
+export const exportAllData = async (orders, expenses, products, settings, trackingNumbers, orderCounter, inventory, includeSettings = true) => {
   try {
+    // Fetch additional data from database
+    const [orderSources, quotations, expenseCategories, inventoryCategories] = await Promise.all([
+      getOrderSources(),
+      getQuotations(),
+      getExpenseCategories(),
+      getInventoryCategories()
+    ])
+
     const data = {
-      version: '1.0',
+      version: '2.0',
       exportDate: new Date().toISOString(),
       orders: orders || [],
       expenses: expenses || [],
       inventory: inventory || [],
       products: products || { categories: [] },
-      settings: settings || {},
       trackingNumbers: trackingNumbers || [],
       orderCounter: orderCounter || null,
-      orderSources: await getOrderSources()
+      orderSources: orderSources || [],
+      quotations: quotations || [],
+      expenseCategories: expenseCategories || [],
+      inventoryCategories: inventoryCategories || []
+    }
+
+    // Only include settings if requested
+    if (includeSettings) {
+      data.settings = settings || {}
     }
 
     const jsonString = JSON.stringify(data, null, 2)
@@ -1466,7 +807,7 @@ export const exportAllData = async (orders, expenses, products, settings, tracki
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `aof-ms-backup-${new Date().toISOString().split('T')[0]}.json`
+    link.download = `aof-biz-backup-${new Date().toISOString().split('T')[0]}.json`
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
@@ -1480,22 +821,29 @@ export const exportAllData = async (orders, expenses, products, settings, tracki
 }
 
 // Import data from a JSON object
-export const importAllDataFromObject = async (data) => {
+export const importAllDataFromObject = async (data, includeSettings = true) => {
   try {
     // Validate data structure
     if (!data || typeof data !== 'object') {
       throw new Error('Invalid data format')
     }
 
-    // Import data to Supabase
+    // Import data to Dexie
     if (data.orders) await saveOrders(data.orders)
     if (data.expenses) await saveExpenses(data.expenses)
     if (data.inventory) await saveInventory(data.inventory)
     if (data.products) await saveProducts(data.products)
-    if (data.settings) await saveSettings(data.settings)
     if (data.trackingNumbers) await saveTrackingNumbers(data.trackingNumbers)
     if (data.orderCounter !== undefined) await saveOrderCounter(data.orderCounter)
     if (data.orderSources) await saveOrderSources(data.orderSources)
+    if (data.quotations) await saveQuotations(data.quotations)
+    if (data.expenseCategories) await saveExpenseCategories(data.expenseCategories)
+    if (data.inventoryCategories) await saveInventoryCategories(data.inventoryCategories)
+
+    // Only import settings if requested
+    if (includeSettings && data.settings) {
+      await saveSettings(data.settings)
+    }
 
     return {
       success: true,
@@ -1505,10 +853,13 @@ export const importAllDataFromObject = async (data) => {
         expenses: data.expenses || [],
         inventory: data.inventory || [],
         products: data.products || { categories: [] },
-        settings: data.settings || {},
+        settings: includeSettings ? (data.settings || {}) : {},
         trackingNumbers: data.trackingNumbers || [],
         orderCounter: data.orderCounter || null,
-        orderSources: data.orderSources || []
+        orderSources: data.orderSources || [],
+        quotations: data.quotations || [],
+        expenseCategories: data.expenseCategories || [],
+        inventoryCategories: data.inventoryCategories || []
       }
     }
   } catch (error) {
@@ -1548,16 +899,16 @@ export const importAllData = async (file) => {
 // Clear all data
 export const clearAllData = async () => {
   try {
-    // Delete all data from Supabase
+    // Clear all data from Dexie stores
     await Promise.all([
-      supabase.from('orders').delete().neq('id', ''),
-      supabase.from('inventory').delete().neq('id', ''),
-      supabase.from('expenses').delete().neq('id', ''),
-      supabase.from('order_sources').delete().neq('id', ''),
-      supabase.from('tracking_numbers').delete().neq('id', ''),
-      supabase.from('order_counter').delete().eq('id', 'counter'),
-      supabase.from('products').delete().eq('id', 'products'),
-      supabase.from('settings').delete().eq('id', 'settings')
+      db.orders.clear(),
+      db.inventory.clear(),
+      db.expenses.clear(),
+      db.orderSources.clear(),
+      db.trackingNumbers.clear(),
+      db.orderCounter.clear(),
+      db.products.clear(), // This table holds products, inventory categories, and expense categories
+      db.settings.clear()
     ])
 
     return { success: true, message: 'All data cleared successfully!' }
@@ -1571,31 +922,10 @@ export const clearAllData = async () => {
 
 export const getInventoryLogs = async () => {
   try {
-    const { data, error } = await supabase
-      .from('inventory_logs')
-      .select('*')
-      .order('date', { ascending: false })
-      .limit(100) // Fetch last 100 logs by default
+    const data = await db.inventoryLogs.orderBy('date').reverse().limit(100).toArray() // Fetch last 100 logs by default
 
-    if (error) {
-      if (error.code === '42P01') { // table does not exist
-        return []
-      }
-      console.error('Error fetching inventory logs:', error)
-      return []
-    }
-
-    return (data || []).map(log => ({
-      id: log.id,
-      inventoryItemId: log.inventory_item_id,
-      itemName: log.item_name,
-      category: log.category,
-      transactionType: log.transaction_type,
-      quantityChange: parseFloat(log.quantity_change || 0),
-      balanceAfter: parseFloat(log.balance_after || 0),
-      date: log.date,
-      notes: log.notes
-    }))
+    // Data stored in Dexie should already be in camelCase, so no transformation needed.
+    return data || []
   } catch (error) {
     console.error('Error reading inventory logs:', error)
     return []
@@ -1606,25 +936,18 @@ export const getInventoryLogs = async () => {
 export const addInventoryLog = async (logData) => {
   try {
     const dbLog = {
-      inventory_item_id: logData.inventoryItemId,
-      item_name: logData.itemName,
+      id: logData.id || Date.now().toString(), // Ensure an ID for Dexie
+      inventoryItemId: logData.inventoryItemId,
+      itemName: logData.itemName,
       category: logData.category,
-      transaction_type: logData.transactionType,
-      quantity_change: logData.quantityChange,
-      balance_after: logData.balanceAfter,
-      date: new Date().toISOString(),
+      transactionType: logData.transactionType,
+      quantityChange: parseFloat(logData.quantityChange || 0),
+      balanceAfter: parseFloat(logData.balanceAfter || 0),
+      date: logData.date || new Date().toISOString(),
       notes: logData.notes || ''
     }
 
-    const { error } = await supabase
-      .from('inventory_logs')
-      .insert([dbLog])
-
-    if (error) {
-      console.error('Error adding inventory log:', error)
-      return false
-    }
-
+    await db.inventoryLogs.add(dbLog)
     return true
   } catch (error) {
     console.error('Error adding inventory log:', error)
@@ -1634,16 +957,7 @@ export const addInventoryLog = async (logData) => {
 
 export const deleteInventoryLog = async (logId) => {
   try {
-    const { error } = await supabase
-      .from('inventory_logs')
-      .delete()
-      .eq('id', logId)
-
-    if (error) {
-      console.error('Error deleting inventory log:', error)
-      return false
-    }
-
+    await db.inventoryLogs.delete(logId)
     return true
   } catch (error) {
     console.error('Error deleting inventory log:', error)
@@ -1655,20 +969,9 @@ export const deleteInventoryLog = async (logId) => {
 
 export const getQuotations = async () => {
   try {
-    const { data, error } = await supabase
-      .from('quotations')
-      .select('*')
-      .order('created_date', { ascending: false })
-
-    if (error) {
-      console.error('Error fetching quotations:', error)
-      return []
-    }
-
-    // Reuse order transformation since structure is similar
-    const transformed = (data || []).map(transformOrderFromDB)
+    const data = await db.quotations.orderBy('createdDate').reverse().toArray()
     console.log(`storage: getQuotations - Fetched ${data?.length} rows.`)
-    return transformed
+    return data || []
   } catch (error) {
     console.error('Error reading quotations:', error)
     return []
@@ -1677,19 +980,24 @@ export const getQuotations = async () => {
 
 export const saveQuotations = async (quotations) => {
   try {
-    // Transform to DB format
-    // Reuse order transformation
-    const dbQuotations = quotations.map(transformOrderToDB)
+    // Get all existing quotation IDs from Dexie
+    const existingIds = new Set(await db.quotations.toCollection().primaryKeys())
+    const newIds = new Set((quotations || []).map(q => q.id))
 
-    const { error } = await supabase
-      .from('quotations')
-      .upsert(dbQuotations, { onConflict: 'id' })
+    // Find quotations to delete (exist in DB but not in new array)
+    const quotationsToDelete = Array.from(existingIds).filter(id => !newIds.has(id))
 
-    if (error) {
-      console.error('Error saving quotations:', error)
-      return false
+    // Delete quotations that are no longer in the array
+    if (quotationsToDelete.length > 0) {
+      await db.quotations.bulkDelete(quotationsToDelete)
     }
 
+    if (!quotations || quotations.length === 0) {
+      return true
+    }
+
+    // Store directly in Dexie
+    await db.quotations.bulkPut(quotations)
     return true
   } catch (error) {
     console.error('Error saving quotations:', error)
@@ -1699,20 +1007,31 @@ export const saveQuotations = async (quotations) => {
 
 export const deleteQuotation = async (id) => {
   try {
-    const { error } = await supabase
-      .from('quotations')
-      .delete()
-      .eq('id', id)
-
-    if (error) {
-      console.error('Error deleting quotation:', error)
-      return false
-    }
-
+    await db.quotations.delete(id)
     return true
   } catch (error) {
     console.error('Error deleting quotation:', error)
     return false
+  }
+}
+
+export const calculateNextQuotationNumber = (quotations = []) => {
+  if (!quotations || quotations.length === 0) {
+    return '1000'
+  }
+
+  const numericIds = quotations
+    .map(q => {
+      const id = parseInt(q.id, 10)
+      return isNaN(id) ? null : id
+    })
+    .filter(id => id !== null && id > 0)
+
+  if (numericIds.length > 0) {
+    const maxId = Math.max(...numericIds)
+    return (maxId + 1).toString()
+  } else {
+    return '1000'
   }
 }
 

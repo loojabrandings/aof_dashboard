@@ -1,6 +1,6 @@
-# Art Of Frames Management System (AOF-MS)
+# AOF Biz - Managment App
 
-A professional business management dashboard for Art Of Frames with cloud-based Supabase storage.
+A professional business managment dashboard for AOF Biz with cloud-based Supabase storage.
 
 ## Features
 
@@ -131,4 +131,4 @@ All tables are created automatically when you run `supabase-schema.sql` in the S
 
 ## License
 
-Private - Art Of Frames Management System
+Private - AOF Biz - Managment App

@@ -1,13 +1,11 @@
 import { useState, useMemo, useEffect } from 'react'
-import {
-    BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-    PieChart, Pie, Cell, AreaChart, Area
-} from 'recharts'
+import BaseAreaChart from '../Common/Charts/BaseAreaChart'
+import BaseDonutChart from '../Common/Charts/BaseDonutChart'
 import { Calendar } from 'lucide-react'
 import { formatCurrency, calculateSalesMetrics, getTopSellingProducts, getTopRevenueProducts } from '../../utils/reportUtils'
 import { getProducts } from '../../utils/storage'
 
-import { COLORS, CustomTooltip, chartTheme, DonutCenterText, renderDonutLabel } from './ChartConfig'
+import { COLORS } from './ChartConfig'
 
 const SalesReports = ({ orders, inventory, expenses, isMobile }) => {
     const [timeRange, setTimeRange] = useState('monthly') // weekly, monthly, yearly
@@ -92,54 +90,24 @@ const SalesReports = ({ orders, inventory, expenses, isMobile }) => {
                 {/* Revenue Trend Chart */}
                 <div className="card" style={{ padding: isMobile ? '1rem' : '1.5rem' }}>
                     <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1.25rem' }}>Revenue Trend</h3>
-                    <div style={{ height: '240px', width: '100%' }}>
-                        <ResponsiveContainer>
-                            <AreaChart data={chartData} margin={{ left: -20, right: 10 }}>
-                                <defs>
-                                    <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.8} />
-                                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                                    </linearGradient>
-                                </defs>
-                                <CartesianGrid {...chartTheme.grid} />
-                                <XAxis dataKey="date" {...chartTheme.axis} />
-                                <YAxis {...chartTheme.axis} />
-                                <Tooltip content={<CustomTooltip />} />
-                                <Area type="monotone" dataKey="revenue" stroke="#3b82f6" fillOpacity={1} fill="url(#colorRevenue)" />
-                            </AreaChart>
-                        </ResponsiveContainer>
-                    </div>
+                    <BaseAreaChart
+                        data={chartData}
+                        dataKey="revenue"
+                        color={COLORS[0]}
+                        gradientId="colorRevenue"
+                        height={240}
+                    />
                 </div>
 
                 {/* Sales by Source */}
                 <div className="card" style={{ padding: isMobile ? '1rem' : '1.5rem' }}>
                     <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1.25rem' }}>Sales by Source</h3>
-                    <div style={{ height: '240px', width: '100%' }}>
-                        <ResponsiveContainer>
-                            <PieChart>
-                                <Tooltip content={<CustomTooltip />} />
-                                <Pie
-                                    data={metrics.sourceData}
-                                    cx="50%"
-                                    cy="50%"
-                                    {...chartTheme.donut}
-                                    dataKey="value"
-                                    label={renderDonutLabel}
-                                    labelLine={false}
-                                >
-                                    {metrics.sourceData.map((entry, index) => (
-                                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                                    ))}
-                                </Pie>
-                                <DonutCenterText
-                                    cx="50%"
-                                    cy="50%"
-                                    label="Total Sales"
-                                    value={metrics.sourceData.reduce((acc, curr) => acc + curr.value, 0)}
-                                />
-                            </PieChart>
-                        </ResponsiveContainer>
-                    </div>
+                    <BaseDonutChart
+                        data={metrics.sourceData}
+                        centerLabel="Total Sales"
+                        centerValue={metrics.sourceData.reduce((acc, curr) => acc + curr.value, 0)}
+                        height={240}
+                    />
                 </div>
 
             </div>

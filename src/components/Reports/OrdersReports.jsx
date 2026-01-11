@@ -1,10 +1,10 @@
 import { useMemo } from 'react'
-import {
-    BarChart, Bar, PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer, XAxis, YAxis, CartesianGrid, AreaChart, Area
-} from 'recharts'
+import BaseAreaChart from '../Common/Charts/BaseAreaChart'
+import BaseBarChart from '../Common/Charts/BaseBarChart'
+import BaseDonutChart from '../Common/Charts/BaseDonutChart'
 import { calculateOrderMetrics, formatCurrency } from '../../utils/reportUtils'
 
-import { COLORS, CustomTooltip, chartTheme, DonutCenterText, renderDonutLabel } from './ChartConfig'
+import { COLORS } from './ChartConfig'
 
 const OrdersReports = ({ orders, isMobile }) => {
     const {
@@ -69,70 +69,41 @@ const OrdersReports = ({ orders, isMobile }) => {
                 {/* Seasonality Trend */}
                 <div className="card" style={{ padding: isMobile ? '1rem' : '1.5rem' }}>
                     <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1.25rem' }}>Order Volume Trend</h3>
-                    <div style={{ height: '260px', width: '100%' }}>
-                        <ResponsiveContainer>
-                            <AreaChart data={monthlyVolume} margin={{ left: -20, right: 10 }}>
-                                <defs>
-                                    <linearGradient id="colorVolume" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.8} />
-                                        <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
-                                    </linearGradient>
-                                </defs>
-                                <CartesianGrid {...chartTheme.grid} />
-                                <XAxis dataKey="date" {...chartTheme.axis} />
-                                <YAxis {...chartTheme.axis} />
-                                <Tooltip content={<CustomTooltip formatter={(val) => val} />} />
-                                <Area type="monotone" dataKey="count" stroke="#8b5cf6" fillOpacity={1} fill="url(#colorVolume)" />
-                            </AreaChart>
-                        </ResponsiveContainer>
-                    </div>
+                    <BaseAreaChart
+                        data={monthlyVolume}
+                        dataKey="count"
+                        color={COLORS[4]}
+                        gradientId="colorVolume"
+                        tooltipFormatter={(val) => val}
+                        height={260}
+                    />
                 </div>
 
                 {/* Top Districts (Geographic) */}
                 <div className="card" style={{ padding: isMobile ? '1rem' : '1.5rem' }}>
                     <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1.25rem' }}>Top 10 Districts</h3>
-                    <div style={{ height: '260px', width: '100%' }}>
-                        <ResponsiveContainer>
-                            <BarChart data={topDistrictsChart} layout="vertical" margin={{ left: -10, right: 10 }}>
-                                <CartesianGrid {...chartTheme.grid} />
-                                <XAxis type="number" {...chartTheme.axis} />
-                                <YAxis dataKey="name" type="category" width={90} {...chartTheme.axis} />
-                                <Tooltip content={<CustomTooltip formatter={(val) => val} />} cursor={chartTheme.tooltipCursor} />
-                                <Bar dataKey="value" fill="#ec4899" radius={[0, 4, 4, 0]} barSize={18} />
-                            </BarChart>
-                        </ResponsiveContainer>
-                    </div>
+                    <BaseBarChart
+                        data={topDistrictsChart}
+                        layout="vertical"
+                        barKeys={[{ key: 'value', color: COLORS[5] }]}
+                        xAxisKey="name"
+                        tooltipFormatter={(val) => val}
+                        barSize={18}
+                        height={260}
+                    />
                 </div>
             </div>
 
             {/* Status Distribution */}
             <div className="card" style={{ padding: isMobile ? '1rem' : '1.5rem' }}>
                 <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1.25rem' }}>Order Status Distribution</h3>
-                <div style={{ height: '300px', width: '100%' }}>
-                    <ResponsiveContainer>
-                        <PieChart>
-                            <Tooltip content={<CustomTooltip formatter={(val) => val} />} />
-                            <Pie
-                                data={statusData}
-                                cx="50%" cy="50%"
-                                {...chartTheme.donut}
-                                dataKey="value"
-                                label={renderDonutLabel}
-                                labelLine={false}
-                            >
-                                {statusData.map((entry, index) => (
-                                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                                ))}
-                            </Pie>
-                            <DonutCenterText
-                                cx="50%"
-                                cy="50%"
-                                label="Total Orders"
-                                value={totalOrders}
-                            />
-                        </PieChart>
-                    </ResponsiveContainer>
-                </div>
+                <BaseDonutChart
+                    data={statusData}
+                    centerLabel="Total Orders"
+                    centerValue={totalOrders}
+                    height={300}
+                    tooltipFormatter={(val) => val}
+                />
             </div>
         </div>
     )

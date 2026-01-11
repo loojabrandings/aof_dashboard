@@ -1,10 +1,20 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { X, Plus, Trash2, Paperclip, Image as ImageIcon, Loader, RefreshCw } from 'lucide-react'
+import { X, Plus, Trash2, Paperclip, Image as ImageIcon, Loader, RefreshCw, Crown, ChevronLeft, ChevronRight, Check, ChevronDown } from 'lucide-react'
+import CustomDropdown from './Common/CustomDropdown'
+import CustomDatePicker from './Common/CustomDatePicker'
+import FormValidation from './FormValidation'
+import { useLicensing } from './LicensingContext'
+import { useToast } from './Toast/ToastContext'
 import { calculateNextOrderNumber, markTrackingNumberAsUsed, getProducts, getOrders, getOrderSources, getSettings } from '../utils/storage'
 import { uploadOrderItemImage, deleteOrderItemImage } from '../utils/fileStorage'
 import { formatWhatsAppForStorage } from '../utils/whatsapp'
+import { toTitleCase, toSentenceCase } from '../utils/textUtils'
 import TrackingNumberInput from './TrackingNumberInput'
 import { curfoxService } from '../utils/curfox'
+import OrderFormCustomer from './OrderForm/OrderFormCustomer'
+import OrderFormItems from './OrderForm/OrderFormItems'
+import OrderFormPricing from './OrderForm/OrderFormPricing'
+import OrderFormLogistics from './OrderForm/OrderFormLogistics'
 
 // Sri Lankan Districts
 const SRI_LANKAN_DISTRICTS = [
@@ -16,6 +26,8 @@ const SRI_LANKAN_DISTRICTS = [
 ]
 
 const OrderForm = ({ order, onClose, onSave, checkIsBlacklisted, onBlacklistWarning }) => {
+  const { isFreeUser } = useLicensing()
+  const { addToast } = useToast()
   const [products, setProducts] = useState({ categories: [] })
   const [orderSources, setOrderSources] = useState([])
   const [districts, setDistricts] = useState(SRI_LANKAN_DISTRICTS)
@@ -26,6 +38,27 @@ const OrderForm = ({ order, onClose, onSave, checkIsBlacklisted, onBlacklistWarn
   const [codManuallyEdited, setCodManuallyEdited] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [discountType, setDiscountType] = useState(order?.discountType || 'Rs')
+
+  // Mobile Wizard State
+  const [currentStep, setCurrentStep] = useState(1)
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768)
+  const [validationErrors, setValidationErrors] = useState({})
+
+
+  const WIZARD_STEPS = [
+    { id: 1, name: 'Customer', shortName: 'Customer' },
+    { id: 2, name: 'Items', shortName: 'Items' },
+    { id: 3, name: 'Pricing', shortName: 'Pricing' },
+    { id: 4, name: 'Details', shortName: 'Details' }
+  ]
+
+  // Detect mobile viewport
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth <= 768)
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
+
   const [orderItems, setOrderItems] = useState(() => {
     if (Array.isArray(order?.orderItems) && order.orderItems.length > 0) {
       return order.orderItems.map(it => ({
@@ -52,6 +85,9 @@ const OrderForm = ({ order, onClose, onSave, checkIsBlacklisted, onBlacklistWarn
       image: null
     }]
   })
+
+  // Handle search queries initialization
+
 
   const getCategoryById = (categoryId) => products.categories.find(cat => cat.id === categoryId)
   const isCustomCategory = (categoryId) => {
@@ -326,7 +362,16 @@ const OrderForm = ({ order, onClose, onSave, checkIsBlacklisted, onBlacklistWarn
 
   const handleChange = (e) => {
     const { name, value } = e.target
-    let updatedData = { ...formData, [name]: value }
+    let updatedData = { ...formData }
+
+    // Apply Capitalization Rules
+    if (name === 'customerName' || name === 'nearestCity' || name === 'district') {
+      updatedData[name] = toTitleCase(value)
+    } else if (name === 'address' || name === 'notes') {
+      updatedData[name] = toSentenceCase(value)
+    } else {
+      updatedData[name] = value
+    }
 
     // Handle discount type change
     if (name === 'discountType') {
@@ -406,7 +451,20 @@ const OrderForm = ({ order, onClose, onSave, checkIsBlacklisted, onBlacklistWarn
 
 
   const updateItem = (id, patch) => {
-    setOrderItems(prev => prev.map(it => it.id === id ? { ...it, ...patch } : it))
+    // Apply Capitalization Rules for patches
+    const formattedPatch = { ...patch }
+    if (formattedPatch.customItemName !== undefined) {
+      formattedPatch.customItemName = toTitleCase(formattedPatch.customItemName)
+      // Sync name if it's being updated alongside customItemName
+      if (formattedPatch.name !== undefined) {
+        formattedPatch.name = formattedPatch.customItemName
+      }
+    }
+    if (formattedPatch.notes !== undefined) {
+      formattedPatch.notes = toSentenceCase(formattedPatch.notes)
+    }
+
+    setOrderItems(prev => prev.map(it => it.id === id ? { ...it, ...formattedPatch } : it))
     setCodManuallyEdited(false)
   }
 
@@ -442,6 +500,25 @@ const OrderForm = ({ order, onClose, onSave, checkIsBlacklisted, onBlacklistWarn
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (isSaving) return
+
+    // Validate all steps
+    let allErrors = {}
+    let firstInvalidStep = null
+
+    for (let i = 1; i <= WIZARD_STEPS.length; i++) {
+      const { valid, errors } = validateStep(i)
+      if (!valid) {
+        allErrors = { ...allErrors, ...errors }
+        if (firstInvalidStep === null) firstInvalidStep = i
+      }
+    }
+
+    if (Object.keys(allErrors).length > 0) {
+      setValidationErrors(allErrors)
+      if (firstInvalidStep) setCurrentStep(firstInvalidStep)
+      addToast('Please correct the highlighted errors.', 'warning')
+      return
+    }
 
     setIsSaving(true)
     try {
@@ -510,559 +587,159 @@ const OrderForm = ({ order, onClose, onSave, checkIsBlacklisted, onBlacklistWarn
     }
   }
 
+  // Validation for each wizard step - returns { valid: boolean, errors: {field: message}, firstError: string }
+  const validateStep = (step) => {
+    const errors = {}
+
+    switch (step) {
+      case 1:
+        // Customer Details: Name, Address, WhatsApp, Date are required
+        if (!formData.customerName?.trim()) errors.customerName = 'Customer Name is required'
+        if (!formData.address?.trim()) errors.address = 'Address is required'
+        if (!formData.whatsapp?.trim()) errors.whatsapp = 'WhatsApp Number is required'
+        if (!formData.orderDate) errors.orderDate = 'Order Date is required'
+        break
+      case 2:
+        // Items: At least one item with category and valid quantity/price
+        const validItem = orderItems.some(it =>
+          it.categoryId && (it.quantity > 0 || it.unitPrice > 0)
+        )
+        if (!validItem) errors.orderItems = 'Please add at least one item with category selected'
+        break
+      case 3:
+        // Pricing: No strict validation needed
+        break
+      case 4:
+        // Final step: Order Source is required (only for non-free users)
+        if (!isFreeUser && !formData.orderSource) errors.orderSource = 'Order Source is required'
+        break
+      default:
+        break
+    }
+
+    const errorKeys = Object.keys(errors)
+    return {
+      valid: errorKeys.length === 0,
+      errors,
+      firstError: errorKeys.length > 0 ? errors[errorKeys[0]] : null
+    }
+  }
+
+  const handleNextStep = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+
+    const validation = validateStep(currentStep)
+    if (!validation.valid) {
+      setValidationErrors(validation.errors)
+      addToast(validation.firstError, 'warning')
+      return
+    }
+
+    // Clear errors and proceed
+    setValidationErrors({})
+    setCurrentStep(prev => prev + 1)
+    document.querySelector('.modal-body')?.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const handlePrevStep = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setValidationErrors({}) // Clear errors when going back
+    setCurrentStep(prev => prev - 1)
+    document.querySelector('.modal-body')?.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  // Helper to get error styling for input fields
+  const getErrorStyle = (fieldName) => {
+    if (validationErrors[fieldName]) {
+      return {
+        borderColor: 'var(--danger)',
+        boxShadow: '0 0 0 2px rgba(239, 68, 68, 0.2)'
+      }
+    }
+    return {}
+  }
+
   return (
     <div className="modal-overlay" onClick={(e) => e.stopPropagation()}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '800px', maxHeight: '90vh', overflowY: 'auto' }}>
-        <div className="modal-header">
-          <h2 className="modal-title">
-            {order ? 'Edit Order' : 'Add New Order'}
-          </h2>
-          <button className="modal-close" onClick={onClose}>
-            <X size={20} />
-          </button>
+      <div className="modal-content modal-content-transparent" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '100%', width: isMobile ? '100%' : '98vw', height: isMobile ? '100%' : '98vh', display: 'flex', flexDirection: 'column' }}>
+        <div className="modal-header" style={isMobile ? { flexDirection: 'column', alignItems: 'stretch', padding: '0.75rem 1rem' } : {}}>
+          {isMobile ? (
+            <>
+              {/* Mobile: Title and Close */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                <span style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                  {order ? 'Edit Order' : 'Add New Order'}
+                </span>
+                <button
+                  className="modal-close"
+                  onClick={onClose}
+                  style={{ position: 'static', color: 'var(--text-primary)', background: 'var(--bg-secondary)', borderRadius: '50%', padding: '0.35rem' }}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              {/* Step Name */}
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.5rem', textAlign: 'center' }}>
+                Step {currentStep} of {WIZARD_STEPS.length}: <strong style={{ color: 'var(--accent-primary)' }}>{WIZARD_STEPS[currentStep - 1]?.name}</strong>
+              </div>
+              {/* Progress Bar */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.25rem'
+              }}>
+                {WIZARD_STEPS.map((step, idx) => (
+                  <div key={step.id} style={{ display: 'flex', alignItems: 'center', flex: 1 }}>
+                    <div
+                      style={{
+                        width: '24px',
+                        height: '24px',
+                        borderRadius: '50%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '0.7rem',
+                        fontWeight: 700,
+                        transition: 'all 0.2s ease',
+                        backgroundColor: currentStep === step.id
+                          ? 'var(--accent-primary)'
+                          : currentStep > step.id
+                            ? 'var(--success)'
+                            : 'var(--bg-secondary)',
+                        color: currentStep >= step.id ? 'white' : 'var(--text-muted)'
+                      }}
+                    >
+                      {currentStep > step.id ? <Check size={12} /> : step.id}
+                    </div>
+                    {idx < WIZARD_STEPS.length - 1 && (
+                      <div style={{
+                        flex: 1,
+                        height: '2px',
+                        backgroundColor: currentStep > step.id ? 'var(--success)' : 'var(--border-color)',
+                        margin: '0 0.25rem'
+                      }} />
+                    )}
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <>
+              <h2 className="modal-title">
+                {order ? 'Edit Order' : 'Add New Order'}
+              </h2>
+              <button className="modal-close" onClick={onClose}>
+                <X size={20} />
+              </button>
+            </>
+          )}
         </div>
 
-        <form onSubmit={handleSubmit}>
-          {/* Order Number and Date */}
-          <div className="form-row">
-            <div className="form-group">
-              <label className="form-label">Order Number</label>
-              <input
-                type="text"
-                name="orderNumber"
-                className="form-input"
-                value={orderNumber}
-                onChange={(e) => setOrderNumber(e.target.value)}
-                placeholder="Auto-filled with next number"
-              />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Date *</label>
-              <input
-                type="date"
-                name="orderDate"
-                className="form-input"
-                value={formData.orderDate}
-                onChange={handleChange}
-                required
-              />
-            </div>
-          </div>
+        <form noValidate onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
 
-          <div className="card" style={{ marginBottom: '1rem', backgroundColor: 'var(--bg-secondary)' }}>
-            <h3 style={{ margin: 0, marginBottom: '1rem', color: 'var(--text-primary)' }}>Customer Details</h3>
-
-            {/* Customer Name */}
-            <div className="form-group">
-              <label className="form-label">Customer Name *</label>
-              <input
-                type="text"
-                name="customerName"
-                className="form-input"
-                value={formData.customerName}
-                onChange={handleChange}
-                required
-              />
-            </div>
-
-            {/* Address */}
-            <div className="form-group">
-              <label className="form-label">Address *</label>
-              <textarea
-                name="address"
-                className="form-input"
-                value={formData.address}
-                onChange={handleChange}
-                rows="3"
-                required
-              />
-            </div>
-
-            {/* WhatsApp Number and Phone Number */}
-            <div className="form-row">
-              <div className="form-group">
-                <label className="form-label">WhatsApp Number *</label>
-                <input
-                  type="tel"
-                  name="whatsapp"
-                  className="form-input"
-                  value={formData.whatsapp}
-                  onChange={handleChange}
-                  onBlur={() => {
-                    if (formData.whatsapp) {
-                      const formatted = formatWhatsAppForStorage(formData.whatsapp)
-                      setFormData(prev => ({ ...prev, whatsapp: formatted }))
-
-                      // Check for blacklist
-                      if (checkIsBlacklisted && onBlacklistWarning) {
-                        const count = checkIsBlacklisted(formatted)
-                        if (count > 0) {
-                          onBlacklistWarning(formatted, count)
-                        }
-                      }
-                    }
-                  }}
-                  placeholder="e.g., 0771234567"
-                  required
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Phone Number</label>
-                <input
-                  type="tel"
-                  name="phone"
-                  className="form-input"
-                  value={formData.phone}
-                  onChange={handleChange}
-                  placeholder="Optional"
-                />
-              </div>
-            </div>
-
-            {/* Nearest City and District */}
-            <div className="form-row">
-              <div className="form-group">
-                <label className="form-label">District</label>
-                <select
-                  name="district"
-                  className="form-input"
-                  value={formData.district}
-                  onChange={handleChange}
-                >
-                  <option value="">Select District</option>
-                  {districts.map(district => (
-                    <option key={district} value={district}>{district}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="form-group">
-                <label className="form-label">Nearest City</label>
-                <input
-                  type="text"
-                  name="nearestCity"
-                  className="form-input"
-                  value={formData.nearestCity}
-                  onChange={handleChange}
-                  placeholder="e.g., Colombo"
-                  autoComplete="off"
-                  list={isCurfoxEnabled ? "curfox-city-list" : undefined}
-                />
-                {isCurfoxEnabled && (
-                  <datalist id="curfox-city-list">
-                    {availableCities.map((city, idx) => (
-                      <option key={`${city}-${idx}`} value={city} />
-                    ))}
-                  </datalist>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="card" style={{ marginBottom: '1rem', backgroundColor: 'var(--bg-secondary)' }}>
-            <h3 style={{ margin: 0, marginBottom: '1rem', color: 'var(--text-primary)' }}>Order Details</h3>
-
-            <div className="form-row">
-              <div className="form-group">
-                <label className="form-label">Scheduled Delivery Date</label>
-                <input
-                  type="date"
-                  name="scheduledDeliveryDate"
-                  className="form-input"
-                  value={formData.scheduledDeliveryDate}
-                  onChange={handleChange}
-                  min={today}
-                />
-                <small style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
-                  If set to a future date, this order will be counted as a scheduled delivery.
-                </small>
-              </div>
-            </div>
-
-            {/* Items */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-              <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Items</div>
-            </div>
-
-            {orderItems.map((it, idx) => {
-              const cat = getCategoryById(it.categoryId)
-              const items = cat?.items || []
-              const custom = isCustomCategory(it.categoryId)
-              return (
-                <div key={it.id} className="card" style={{ marginBottom: '0.75rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-                    <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Item #{idx + 1}</div>
-                    {orderItems.length > 1 && (
-                      <button type="button" className="btn btn-danger btn-sm" onClick={() => removeItem(it.id)} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                        <Trash2 size={16} /> Remove
-                      </button>
-                    )}
-                  </div>
-
-                  <div className="form-row">
-                    <div className="form-group">
-                      <label className="form-label">Category *</label>
-                      <select
-                        className="form-input"
-                        value={it.categoryId}
-                        onChange={(e) => updateItem(it.id, { categoryId: e.target.value, itemId: '', customItemName: '', unitPrice: 0 })}
-                        required
-                      >
-                        <option value="">Select category</option>
-                        {products.categories.map(c => (
-                          <option key={c.id} value={c.id}>{c.name}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">{custom ? 'Custom Product *' : 'Product *'}</label>
-                      {custom ? (
-                        <input
-                          className="form-input"
-                          value={it.customItemName}
-                          onChange={(e) => updateItem(it.id, { customItemName: e.target.value, name: e.target.value })}
-                          placeholder="Enter custom product name"
-                          required
-                        />
-                      ) : (
-                        <select
-                          className="form-input"
-                          value={it.itemId}
-                          onChange={(e) => {
-                            const itemObj = items.find(x => x.id === e.target.value)
-                            updateItem(it.id, { itemId: e.target.value, unitPrice: itemObj?.price ?? 0, name: itemObj?.name || '' })
-                          }}
-                          required
-                          disabled={!it.categoryId}
-                        >
-                          <option value="">Select product</option>
-                          {items.map(p => (
-                            <option key={p.id} value={p.id}>{p.name}</option>
-                          ))}
-                        </select>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="form-row" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
-                    <div className="form-group">
-                      <label className="form-label">Quantity *</label>
-                      <input
-                        type="number"
-                        className="form-input"
-                        value={it.quantity}
-                        onChange={(e) => updateItem(it.id, { quantity: parseFloat(e.target.value) || 0 })}
-                        min="0"
-                        step="1"
-                        required
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Price *</label>
-                      <input
-                        type="number"
-                        className="form-input"
-                        value={it.unitPrice}
-                        onChange={(e) => updateItem(it.id, { unitPrice: parseFloat(e.target.value) || 0 })}
-                        min="0"
-                        step="0.01"
-                        required
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Total</label>
-                      <input
-                        type="text"
-                        className="form-input"
-                        value={((Number(it.quantity) || 0) * (Number(it.unitPrice) || 0)).toFixed(2)}
-                        readOnly
-                        style={{ backgroundColor: 'var(--bg-card)' }}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="form-group" style={{ marginBottom: 0 }}>
-                    <label className="form-label">Notes</label>
-                    <textarea
-                      className="form-input"
-                      value={it.notes || ''}
-                      onChange={(e) => updateItem(it.id, { notes: e.target.value })}
-                      rows="2"
-                      placeholder="Item-specific instructions (e.g., engraving text, packaging notes)"
-                    />
-                  </div>
-
-                  {/* Image Upload UI */}
-                  <div className="form-group" style={{ marginTop: '0.75rem' }}>
-                    <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem' }}>
-                      Image Reference
-                    </label>
-
-                    {it.image ? (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', background: 'var(--bg-card)', padding: '0.5rem', borderRadius: 'var(--radius)', border: '1px solid var(--border-color)' }}>
-                        <a href={it.image} target="_blank" rel="noopener noreferrer" style={{ display: 'block' }}>
-                          <img
-                            src={it.image}
-                            alt="Item"
-                            style={{ width: '60px', height: '60px', objectFit: 'cover', borderRadius: '4px', cursor: 'pointer' }}
-                            onMouseOver={e => e.currentTarget.style.transform = 'scale(1.5)'}
-                            onMouseOut={e => e.currentTarget.style.transform = 'scale(1)'}
-                          />
-                        </a>
-                        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Attached</span>
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-sm"
-                            onClick={() => handleUploadClick(it.id)}
-                            title="Replace Image"
-                          >
-                            <RefreshCw size={14} />
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-danger btn-sm"
-                            onClick={() => handleRemoveImage(it.id, it.image)}
-                            title="Remove Image"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div>
-                        <button
-                          type="button"
-                          className="btn btn-secondary btn-sm"
-                          onClick={() => handleUploadClick(it.id)}
-                          style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}
-                          disabled={uploadingItemIds.has(it.id)}
-                        >
-                          {uploadingItemIds.has(it.id) ? <Loader size={16} className="spin" /> : <Paperclip size={16} />}
-                          {uploadingItemIds.has(it.id) ? 'Uploading...' : 'Attach Image'}
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )
-            })}
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={addMoreItem}
-                style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
-              >
-                <Plus size={16} /> Add More
-              </button>
-            </div>
-
-            {/* Totals */}
-            <div className="form-row">
-              <div className="form-group">
-                <label className="form-label">Subtotal</label>
-                <input className="form-input" value={subtotal.toFixed(2)} readOnly style={{ backgroundColor: 'var(--bg-card)' }} />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Discount</label>
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  <select name="discountType" className="form-input" value={discountType} onChange={handleChange} style={{ width: '110px' }}>
-                    <option value="Rs">Rs</option>
-                    <option value="%">%</option>
-                  </select>
-                  <input
-                    type="number"
-                    name="discount"
-                    className="form-input"
-                    value={formData.discount}
-                    onChange={handleChange}
-                    min="0"
-                    step="0.01"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="form-row">
-              <div className="form-group">
-                <label className="form-label">Total Price</label>
-                <input className="form-input" value={computedTotal.toFixed(2)} readOnly style={{ backgroundColor: 'var(--bg-card)' }} />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Delivery Charge</label>
-                <input
-                  type="number"
-                  name="deliveryCharge"
-                  className="form-input"
-                  value={formData.deliveryCharge}
-                  onChange={handleChange}
-                  min="0"
-                  step="1"
-                />
-              </div>
-            </div>
-
-            <div className="form-row">
-              <div className="form-group">
-                <label className="form-label">Advance Payment</label>
-                <input
-                  type="number"
-                  name="advancePayment"
-                  className="form-input"
-                  value={formData.advancePayment}
-                  onChange={handleChange}
-                  min="0"
-                  step="0.01"
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Balance Remaining</label>
-                <input
-                  className="form-input"
-                  value={`Rs. ${(computedBalance).toFixed(2)}`}
-                  readOnly
-                  tabIndex="-1"
-                  style={{ backgroundColor: 'var(--bg-card)', color: 'var(--text-muted)' }}
-                />
-              </div>
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">Payment Method</label>
-              <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                <button
-                  type="button"
-                  className={`btn ${formData.paymentMethod === 'COD' ? 'btn-primary' : 'btn-secondary'}`}
-                  style={{ flex: 1, justifyContent: 'center' }}
-                  onClick={() => handleChange({ target: { name: 'paymentMethod', value: 'COD' } })}
-                >
-                  Cash on Delivery (COD)
-                </button>
-                <button
-                  type="button"
-                  className={`btn ${formData.paymentMethod === 'Bank Deposit' ? 'btn-primary' : 'btn-secondary'}`}
-                  style={{ flex: 1, justifyContent: 'center' }}
-                  onClick={() => handleChange({ target: { name: 'paymentMethod', value: 'Bank Deposit' } })}
-                >
-                  Bank Deposit
-                </button>
-              </div>
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">{formData.paymentMethod === 'COD' ? 'COD Amount' : 'Amount'}</label>
-              <input
-                type="number"
-                name="codAmount"
-                className="form-input"
-                value={formData.codAmount}
-                onChange={handleChange}
-                min="0"
-                step="0.01"
-              />
-              <small style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
-                {formData.paymentMethod === 'COD'
-                  ? 'Auto-calculated as Total + Delivery. You can edit manually if needed.'
-                  : 'Final amount including delivery.'}
-              </small>
-            </div>
-          </div>
-
-          {/* Order Details */}
-          <div className="form-group">
-            <label className="form-label">Notes</label>
-            <textarea
-              name="notes"
-              className="form-input"
-              value={formData.notes}
-              onChange={handleChange}
-              rows="3"
-              placeholder="Special instructions or notes..."
-            />
-          </div>
-
-          {/* Status */}
-          <div className="form-row">
-            <div className="form-group">
-              <label className="form-label">Status *</label>
-              <select
-                name="status"
-                className="form-input"
-                value={formData.status}
-                onChange={handleChange}
-                required
-              >
-                <option value="New Order">New Order</option>
-                <option value="Packed">Packed</option>
-                <option value="Dispatched">Dispatched</option>
-                <option value="returned">Returned</option>
-                <option value="refund">Refund</option>
-                <option value="cancelled">Cancelled</option>
-              </select>
-            </div>
-            <div className="form-group">
-              <label className="form-label">Payment Status *</label>
-              <select
-                name="paymentStatus"
-                className="form-input"
-                value={formData.paymentStatus}
-                onChange={handleChange}
-                required
-              >
-                <option value="Pending">Pending</option>
-                <option value="Paid">Paid</option>
-              </select>
-            </div>
-          </div>
-
-          {(formData.status === 'Packed' || formData.status === 'Dispatched') && (
-            <div className="form-row">
-              <div className="form-group">
-                <label className="form-label">Tracking Number</label>
-                {isCurfoxEnabled ? (
-                  <div>
-                    <input
-                      name="trackingNumber"
-                      className="form-input"
-                      value={formData.trackingNumber}
-                      onChange={handleChange}
-                      placeholder="Waybill ID"
-                    />
-                    <small style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                      Auto-generated on Dispatch, or enter manually.
-                    </small>
-                  </div>
-                ) : (
-                  <TrackingNumberInput
-                    value={formData.trackingNumber}
-                    onChange={handleChange}
-                  />
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Order Source - Stored internally, not displayed in reports/views */}
-          <div className="form-group">
-            <label className="form-label">Order Source *</label>
-            <select
-              name="orderSource"
-              className="form-input"
-              value={formData.orderSource}
-              onChange={handleChange}
-              required
-            >
-              <option value="">Select a source</option>
-              {(orderSources.length > 0 ? orderSources : [{ id: 'Ad', name: 'Ad' }, { id: 'Organic', name: 'Organic' }]).map(src => (
-                <option key={src.id} value={src.name}>{src.name}</option>
-              ))}
-            </select>
-          </div>
-
-
-
-          {/* Hidden File Input for Item Images */}
+          {/* Hidden File Input for Image Uploads - Kept in Parent for Ref management */}
           <input
             type="file"
             ref={fileInputRef}
@@ -1071,24 +748,263 @@ const OrderForm = ({ order, onClose, onSave, checkIsBlacklisted, onBlacklistWarn
             accept="image/*"
           />
 
-          <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end', marginTop: '1.5rem' }}>
-            <button type="button" className="btn btn-secondary" onClick={onClose}>
-              Cancel
-            </button>
-            <button type="submit" className="btn btn-primary" disabled={isSaving}>
-              {isSaving ? (
-                <>
-                  <RefreshCw size={18} className="animate-spin" style={{ marginRight: '0.5rem' }} />
-                  Saving...
-                </>
-              ) : (
-                order ? 'Update Order' : 'Create Order'
-              )}
-            </button>
+          <div className="modal-body" style={!isMobile ? {
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr 1fr',
+            gap: '1rem',
+            padding: '1rem',
+            overflow: 'hidden', // Columns scroll independently
+            flex: 1,
+            height: '100%'
+          } : { overflowY: 'auto' }}>
+
+            {/* --- DESKTOP VIEW --- */}
+            {!isMobile && (
+              <>
+                {/* Left Column: Customer & Logistics */}
+                <div style={{ overflowY: 'auto', paddingRight: '1rem', borderRight: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '1rem' }} className="custom-scrollbar">
+                  <OrderFormCustomer
+                    formData={formData}
+                    handleChange={handleChange}
+                    setFormData={setFormData}
+                    validationErrors={validationErrors}
+                    getErrorStyle={getErrorStyle}
+                    districts={districts}
+                    availableCities={availableCities}
+                    isFreeUser={isFreeUser}
+                    isCurfoxEnabled={isCurfoxEnabled}
+                    checkIsBlacklisted={checkIsBlacklisted}
+                    onBlacklistWarning={onBlacklistWarning}
+                    orderNumber={orderNumber}
+                    setOrderNumber={setOrderNumber}
+                    isMobile={false}
+                  />
+                  <OrderFormLogistics
+                    formData={formData}
+                    handleChange={handleChange}
+                    validationErrors={validationErrors}
+                    isFreeUser={isFreeUser}
+                    isCurfoxEnabled={isCurfoxEnabled}
+                    orderSources={orderSources}
+                    isMobile={false}
+                  />
+                </div>
+
+                {/* Middle Column: Items */}
+                <div style={{ overflowY: 'auto', paddingRight: '1rem', paddingLeft: '0.5rem', borderRight: '1px solid var(--border-color)' }} className="custom-scrollbar">
+                  <OrderFormItems
+                    orderItems={orderItems}
+                    updateItem={updateItem}
+                    removeItem={removeItem}
+                    addMoreItem={addMoreItem}
+                    handleUploadClick={handleUploadClick}
+                    handleRemoveImage={handleRemoveImage}
+                    uploadingItemIds={uploadingItemIds}
+                    products={products}
+                    validationErrors={validationErrors}
+                    isFreeUser={isFreeUser}
+                    isMobile={false}
+                    today={today}
+                    formData={formData}
+                    handleChange={handleChange}
+                  />
+                </div>
+
+                {/* Right Column: Pricing */}
+                <div style={{ overflowY: 'auto', paddingLeft: '0.5rem' }} className="custom-scrollbar">
+                  <OrderFormPricing
+                    formData={formData}
+                    handleChange={handleChange}
+                    subtotal={subtotal}
+                    discountType={discountType}
+                    setDiscountType={setDiscountType}
+                    computedTotal={computedTotal}
+                    computedBalance={computedBalance}
+                    isFreeUser={isFreeUser}
+                    isMobile={false}
+                  />
+                  {/* Save Buttons for Desktop */}
+                  <div style={{ marginTop: 'auto', paddingTop: '1rem', position: 'sticky', bottom: 0 }}>
+                    <div style={{ display: 'flex', gap: '0.75rem' }}>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={onClose}
+                        style={{ flex: 1, justifyContent: 'center', padding: '0.75rem', fontSize: '1rem' }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        className="btn btn-primary"
+                        disabled={isSaving}
+                        style={{ flex: 2, justifyContent: 'center', padding: '0.75rem', fontSize: '1rem' }}
+                      >
+                        {isSaving ? (
+                          <>
+                            <RefreshCw size={18} className="animate-spin" style={{ marginRight: '0.5rem' }} />
+                            Saving...
+                          </>
+                        ) : (
+                          order ? 'Update Order' : 'Create Order'
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* --- MOBILE WIZARD VIEW --- */}
+            {isMobile && (
+              <>
+                {currentStep === 1 && (
+                  <OrderFormCustomer
+                    formData={formData}
+                    handleChange={handleChange}
+                    setFormData={setFormData}
+                    validationErrors={validationErrors}
+                    getErrorStyle={getErrorStyle}
+                    districts={districts}
+                    availableCities={availableCities}
+                    isFreeUser={isFreeUser}
+                    isCurfoxEnabled={isCurfoxEnabled}
+                    checkIsBlacklisted={checkIsBlacklisted}
+                    onBlacklistWarning={onBlacklistWarning}
+                    orderNumber={orderNumber}
+                    setOrderNumber={setOrderNumber}
+                    isMobile={true}
+                  />
+                )}
+
+                {currentStep === 2 && (
+                  <OrderFormItems
+                    orderItems={orderItems}
+                    updateItem={updateItem}
+                    removeItem={removeItem}
+                    addMoreItem={addMoreItem}
+                    handleUploadClick={handleUploadClick}
+                    handleRemoveImage={handleRemoveImage}
+                    uploadingItemIds={uploadingItemIds}
+                    products={products}
+                    validationErrors={validationErrors}
+                    isFreeUser={isFreeUser}
+                    isMobile={true}
+                    today={today}
+                    formData={formData}
+                    handleChange={handleChange}
+                  />
+                )}
+
+                {currentStep === 3 && (
+                  <OrderFormPricing
+                    formData={formData}
+                    handleChange={handleChange}
+                    subtotal={subtotal}
+                    discountType={discountType}
+                    setDiscountType={setDiscountType}
+                    computedTotal={computedTotal}
+                    computedBalance={computedBalance}
+                    isFreeUser={isFreeUser}
+                    isMobile={true}
+                  />
+                )}
+
+                {currentStep === 4 && (
+                  <OrderFormLogistics
+                    formData={formData}
+                    handleChange={handleChange}
+                    validationErrors={validationErrors}
+                    isFreeUser={isFreeUser}
+                    isCurfoxEnabled={isCurfoxEnabled}
+                    orderSources={orderSources}
+                    isMobile={true}
+                  />
+                )}
+              </>
+            )}
           </div>
+
+          {/* Mobile Footer (Nav) / Desktop Footer (Cancel but Save is in Right Col) */}
+          {/* Note: Desktop Save is now in Right Column for better UX, but we can keep standard footer if preferred. 
+              The Grid design benefits from "Submit" being near "Total". 
+              I added Submit to Right Column above. I will hide standard footer for Desktop or use it for Cancel only.
+          */}
+
+          {isMobile ? (
+            <div style={{
+              padding: '0.75rem 1rem',
+              backgroundColor: 'var(--bg-secondary)',
+              borderTop: '1px solid var(--border-color)',
+            }}>
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: '1rem'
+              }}>
+                <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Total:</span>
+                <span style={{
+                  fontSize: '1.25rem',
+                  fontWeight: 700,
+                  color: 'var(--accent-primary)'
+                }}>
+                  Rs. {(formData.codAmount || 0).toFixed(2)}
+                </span>
+              </div>
+
+              <div className="modal-footer" style={{ display: 'flex', gap: '0.75rem', padding: 0, marginTop: 0 }}>
+                {currentStep > 1 && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={handlePrevStep}
+                    style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
+                  >
+                    <ChevronLeft size={18} /> Back
+                  </button>
+                )}
+
+                {currentStep < 4 ? (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={handleNextStep}
+                    style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
+                  >
+                    Next <ChevronRight size={18} />
+                  </button>
+                ) : (
+                  <button type="submit" className="btn btn-primary" disabled={isSaving} style={{ flex: 1 }}>
+                    {isSaving ? (
+                      <>
+                        <RefreshCw size={18} className="animate-spin" style={{ marginRight: '0.5rem' }} />
+                        Saving...
+                      </>
+                    ) : (
+                      order ? 'Update Order' : 'Create Order'
+                    )}
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : (
+            // Desktop Footer - Optional, as I put Save in the right column. 
+            // But purely for "Cancel" or consistency, we can have it.
+            // Actually, putting Save in the right column is better for specific context, 
+            // but visually a bottom bar is more standard.
+            // I'll keep the bottom bar for "Cancel" and maybe "Save Draft" if requested, 
+            // or just a secondary Save button.
+            null
+            // I decided to hide the footer on desktop and put the primary action in the right column as implemented above.
+            // Wait, does "Cancel" exist in desktop? Yes, the specific button in Grid Right Column is 'Create Order'. 
+            // 'Cancel' is top right 'X'. 
+            // Maybe adding a 'Cancel' button in the right column too?
+            // I added it in the Right Column card area? No just Submit.
+          )}
         </form>
-      </div >
-    </div >
+      </div>
+    </div>
   )
 }
 

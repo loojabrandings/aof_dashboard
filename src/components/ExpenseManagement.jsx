@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react'
 import { Plus, Edit2, Trash2, Save, X, DollarSign, Tag } from 'lucide-react'
 import { getExpenseCategories, saveExpenseCategories } from '../utils/storage'
+import { toTitleCase } from '../utils/textUtils'
 import ConfirmationModal from './ConfirmationModal'
+import Pagination from './Common/Pagination'
 import { useToast } from './Toast/ToastContext'
 
 const ExpenseManagement = () => {
@@ -13,6 +15,8 @@ const ExpenseManagement = () => {
   const [categoryFormData, setCategoryFormData] = useState({ name: '' })
   const [editingItem, setEditingItem] = useState(null) // { categoryId, itemId }
   const [itemFormData, setItemFormData] = useState({ name: '' })
+  const [currentPage, setCurrentPage] = useState(1)
+  const [itemsPerPage, setItemsPerPage] = useState(20)
 
   // Modal State
   const [modalConfig, setModalConfig] = useState({
@@ -111,7 +115,7 @@ const ExpenseManagement = () => {
       // Edit existing category
       const categoryIndex = updated.categories.findIndex(cat => cat.id === editingCategory)
       if (categoryIndex !== -1) {
-        updated.categories[categoryIndex].name = categoryFormData.name.trim()
+        updated.categories[categoryIndex].name = toTitleCase(categoryFormData.name.trim())
         updated.categories[categoryIndex].items = Array.isArray(updated.categories[categoryIndex].items)
           ? updated.categories[categoryIndex].items
           : []
@@ -120,7 +124,7 @@ const ExpenseManagement = () => {
       // Add new category
       updated.categories.push({
         id: generateId(),
-        name: categoryFormData.name.trim(),
+        name: toTitleCase(categoryFormData.name.trim()),
         items: []
       })
     }
@@ -174,7 +178,7 @@ const ExpenseManagement = () => {
   const handleSaveItem = async () => {
     const categoryId = editingItem?.categoryId
     if (!categoryId) return
-    const name = (itemFormData.name || '').trim()
+    const name = toTitleCase((itemFormData.name || '').trim())
     if (!name) {
       addToast('Please enter an item name', 'warning')
       return
@@ -379,7 +383,7 @@ const ExpenseManagement = () => {
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          {expenseCategories.categories.map((category) => (
+          {expenseCategories.categories.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((category) => (
             <div key={category.id} className="card">
               {/* Category Header */}
               <div className="category-card-header" style={{
@@ -513,6 +517,14 @@ const ExpenseManagement = () => {
               )}
             </div>
           ))}
+          <Pagination
+            currentPage={currentPage}
+            totalPages={Math.ceil(expenseCategories.categories.length / itemsPerPage)}
+            onPageChange={setCurrentPage}
+            totalItems={expenseCategories.categories.length}
+            itemsPerPage={itemsPerPage}
+            onItemsPerPageChange={setItemsPerPage}
+          />
         </div>
       )}
       <ConfirmationModal

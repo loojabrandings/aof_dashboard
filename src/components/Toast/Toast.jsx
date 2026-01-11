@@ -28,9 +28,9 @@ const Toast = ({ id, message, type, onDismiss }) => {
             gap: '0.75rem',
             padding: '1rem',
             borderRadius: 'var(--radius)',
-            background: 'rgba(0, 0, 0, 0.95)', // Use explicit white for contrast or var(--bg-card)
+            background: 'var(--modal-bg)',
             backdropFilter: 'blur(10px)',
-            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+            boxShadow: 'var(--card-shadow)',
             border: '1px solid var(--border-color)',
             minWidth: '300px',
             maxWidth: '400px',

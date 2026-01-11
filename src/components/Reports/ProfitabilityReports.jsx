@@ -1,10 +1,9 @@
 import { useMemo } from 'react'
-import {
-    ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell
-} from 'recharts'
+import BaseComposedChart from '../Common/Charts/BaseComposedChart'
+import BaseDonutChart from '../Common/Charts/BaseDonutChart'
 import { formatCurrency, calculateProfitabilityMetrics } from '../../utils/reportUtils'
 
-import { COLORS, CustomTooltip, chartTheme, DonutCenterText, renderDonutLabel } from './ChartConfig'
+import { COLORS } from './ChartConfig'
 
 const ProfitabilityReports = ({ orders, expenses, isMobile }) => {
     const { monthlyData, pieData, netProfit, margin, avgRevenuePerOrder, avgCostPerOrder, avgProfitPerOrder, profitabilityBySource } = useMemo(() =>
@@ -73,80 +72,42 @@ const ProfitabilityReports = ({ orders, expenses, isMobile }) => {
                 {/* Monthly Profit Trend */}
                 <div className="card" style={{ padding: isMobile ? '1rem' : '1.5rem' }}>
                     <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1.25rem' }}>Profit Trend</h3>
-                    <div style={{ height: '240px', width: '100%' }}>
-                        <ResponsiveContainer>
-                            <ComposedChart data={monthlyData} margin={{ left: -20, right: 10 }}>
-                                <CartesianGrid {...chartTheme.grid} />
-                                <XAxis dataKey="date" {...chartTheme.axis} />
-                                <YAxis {...chartTheme.axis} tickFormatter={(val) => `${val / 1000}k`} />
-                                <Tooltip content={<CustomTooltip />} />
-                                <Legend wrapperStyle={chartTheme.legend.wrapperStyle} />
-                                <Bar dataKey="revenue" stackId="a" fill="#3b82f6" name="Revenue" radius={[2, 2, 0, 0]} barSize={16} />
-                                <Bar dataKey="expenses" stackId="a" fill="#ef4444" name="Expenses" radius={[2, 2, 0, 0]} barSize={16} />
-                                <Line type="monotone" dataKey="profit" stroke="#10b981" strokeWidth={2} dot={{ r: 3, fill: '#10b981' }} name="Profit" />
-                            </ComposedChart>
-                        </ResponsiveContainer>
-                    </div>
+                    <BaseComposedChart
+                        data={monthlyData}
+                        bars={[
+                            { key: 'revenue', name: 'Revenue', color: COLORS[0], stackId: 'a' },
+                            { key: 'expenses', name: 'Expenses', color: COLORS[3], stackId: 'a' }
+                        ]}
+                        lines={[
+                            { key: 'profit', name: 'Profit', color: COLORS[1] }
+                        ]}
+                        xAxisKey="date"
+                        height={240}
+                        tickFormatter={(val) => `${val / 1000}k`}
+                    />
                 </div>
 
                 {/* Expense Breakdown Pie */}
                 <div className="card" style={{ padding: isMobile ? '1rem' : '1.5rem' }}>
                     <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1.25rem' }}>Money Flow</h3>
-                    <div style={{ height: '240px', width: '100%' }}>
-                        <ResponsiveContainer>
-                            <PieChart>
-                                <Tooltip content={<CustomTooltip />} />
-                                <Pie
-                                    data={pieData}
-                                    cx="50%" cy="50%"
-                                    {...chartTheme.donut}
-                                    dataKey="value"
-                                    label={renderDonutLabel}
-                                    labelLine={false}
-                                >
-                                    {pieData.map((entry, index) => (
-                                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                                    ))}
-                                </Pie>
-                                <DonutCenterText
-                                    cx="50%"
-                                    cy="50%"
-                                    label="Margin"
-                                    value={`${margin.toFixed(1)}%`}
-                                />
-                            </PieChart>
-                        </ResponsiveContainer>
-                    </div>
+                    <BaseDonutChart
+                        data={pieData}
+                        centerLabel="Margin"
+                        centerValue={`${margin.toFixed(1)}%`}
+                        height={240}
+                    />
                 </div>
 
                 {/* Profit by Channel (Moved from Sales Reports) */}
                 <div className="card" style={{ padding: isMobile ? '1rem' : '1.5rem' }}>
                     <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '1.25rem' }}>Profit by Source</h3>
-                    <div style={{ height: '240px', width: '100%' }}>
-                        <ResponsiveContainer>
-                            <PieChart>
-                                <Tooltip content={<CustomTooltip />} />
-                                <Pie
-                                    data={profitabilityBySource}
-                                    cx="50%" cy="50%"
-                                    {...chartTheme.donut}
-                                    dataKey="value" nameKey="name"
-                                    label={renderDonutLabel}
-                                    labelLine={false}
-                                >
-                                    {profitabilityBySource.map((entry, index) => (
-                                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                                    ))}
-                                </Pie>
-                                <DonutCenterText
-                                    cx="50%"
-                                    cy="50%"
-                                    label="Net Profit"
-                                    value={formatCurrency(netProfit)}
-                                />
-                            </PieChart>
-                        </ResponsiveContainer>
-                    </div>
+                    <BaseDonutChart
+                        data={profitabilityBySource}
+                        centerLabel="Net Profit"
+                        centerValue={formatCurrency(netProfit)}
+                        height={240}
+                        nameKey="name"
+                    />
                 </div>
             </div>
 

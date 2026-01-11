@@ -1,5 +1,5 @@
 @echo off
-echo Starting Art Of Frames Management System...
+echo Starting AOF Biz - Managment App...
 echo.
 
 REM Check if Node.js is installed

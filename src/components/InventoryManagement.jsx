@@ -1,11 +1,16 @@
 import { useState, useEffect } from 'react'
 import { Plus, Edit2, Trash2, Save, X, Package, Tag } from 'lucide-react'
+import FormValidation from './FormValidation'
 import { getInventoryCategories, saveInventoryCategories, saveInventory } from '../utils/storage'
+import { toTitleCase } from '../utils/textUtils'
 import ConfirmationModal from './ConfirmationModal'
+import Pagination from './Common/Pagination'
 import { useToast } from './Toast/ToastContext'
 
 const InventoryManagement = ({ inventory, onUpdateInventory }) => {
   const { addToast } = useToast()
+  const [currentPage, setCurrentPage] = useState(1)
+  const [itemsPerPage, setItemsPerPage] = useState(20)
   const [inventoryCategories, setInventoryCategories] = useState({ categories: [] })
   const [editingCategory, setEditingCategory] = useState(null)
   const [showCategoryForm, setShowCategoryForm] = useState(false)
@@ -19,6 +24,17 @@ const InventoryManagement = ({ inventory, onUpdateInventory }) => {
     supplier: '',
     currentStock: 0
   })
+  const [validationErrors, setValidationErrors] = useState({})
+
+  const getErrorStyle = (fieldName) => {
+    if (validationErrors[fieldName]) {
+      return {
+        borderColor: 'var(--danger)',
+        boxShadow: '0 0 0 2px rgba(239, 68, 68, 0.2)'
+      }
+    }
+    return {}
+  }
 
   // Modal State
   const [modalConfig, setModalConfig] = useState({
@@ -84,12 +100,14 @@ const InventoryManagement = ({ inventory, onUpdateInventory }) => {
   const handleAddCategory = () => {
     setCategoryFormData({ name: '' })
     setEditingCategory(null)
+    setValidationErrors({})
     setShowCategoryForm(true)
   }
 
   const handleEditCategory = (category) => {
     setCategoryFormData({ name: category.name })
     setEditingCategory(category)
+    setValidationErrors({})
     setShowCategoryForm(true)
   }
 
@@ -119,9 +137,10 @@ const InventoryManagement = ({ inventory, onUpdateInventory }) => {
   const handleSaveCategory = async (e) => {
     e.preventDefault()
     if (!categoryFormData.name.trim()) {
-      addToast('Category name is required', 'warning')
+      setValidationErrors({ name: 'Category name is required' })
       return
     }
+    setValidationErrors({})
 
     let updatedCategories
     if (editingCategory) {
@@ -130,7 +149,7 @@ const InventoryManagement = ({ inventory, onUpdateInventory }) => {
       updatedCategories = {
         categories: inventoryCategories.categories.map(cat =>
           cat.id === editingCategory.id
-            ? { ...cat, name: categoryFormData.name.trim() }
+            ? { ...cat, name: toTitleCase(categoryFormData.name.trim()) }
             : cat
         )
       }
@@ -138,7 +157,7 @@ const InventoryManagement = ({ inventory, onUpdateInventory }) => {
       // Update inventory items with old category name
       const updatedInventory = inventory.map(item =>
         item.category === oldCategoryName
-          ? { ...item, category: categoryFormData.name.trim() }
+          ? { ...item, category: toTitleCase(categoryFormData.name.trim()) }
           : item
       )
       await saveInventory(updatedInventory)
@@ -149,7 +168,7 @@ const InventoryManagement = ({ inventory, onUpdateInventory }) => {
       // Add new category
       const newCategory = {
         id: Date.now().toString(),
-        name: categoryFormData.name.trim(),
+        name: toTitleCase(categoryFormData.name.trim()),
         items: []
       }
       updatedCategories = {
@@ -178,6 +197,7 @@ const InventoryManagement = ({ inventory, onUpdateInventory }) => {
     })
     setEditingItem(null)
     setEditingCategory(category)
+    setValidationErrors({})
     setShowCategoryForm(false)
   }
 
@@ -192,6 +212,7 @@ const InventoryManagement = ({ inventory, onUpdateInventory }) => {
     setEditingItem(item)
     const category = inventoryCategories.categories.find(cat => cat.name === item.category)
     setEditingCategory(category)
+    setValidationErrors({})
     setShowCategoryForm(false)
   }
 
@@ -213,9 +234,10 @@ const InventoryManagement = ({ inventory, onUpdateInventory }) => {
   const handleSaveItem = async (e) => {
     e.preventDefault()
     if (!itemFormData.name.trim()) {
-      addToast('Item name is required', 'warning')
+      setValidationErrors({ name: 'Item name is required' })
       return
     }
+    setValidationErrors({})
 
     if (!editingCategory) {
       addToast('Please select a category first', 'warning')
@@ -224,12 +246,12 @@ const InventoryManagement = ({ inventory, onUpdateInventory }) => {
 
     const itemData = {
       id: editingItem ? editingItem.id : Date.now().toString(),
-      itemName: itemFormData.name.trim(),
+      itemName: toTitleCase(itemFormData.name.trim()),
       category: editingCategory.name,
       currentStock: parseFloat(itemFormData.currentStock) || 0,
       reorderLevel: parseFloat(itemFormData.reorderLevel) || 0,
       unitCost: parseFloat(itemFormData.unitCost) || 0,
-      supplier: itemFormData.supplier.trim() || ''
+      supplier: toTitleCase(itemFormData.supplier.trim()) || ''
     }
 
     let updatedInventory
@@ -406,17 +428,22 @@ const InventoryManagement = ({ inventory, onUpdateInventory }) => {
               <X size={20} />
             </button>
           </div>
-          <form onSubmit={handleSaveCategory}>
+          <form noValidate onSubmit={handleSaveCategory}>
             <div className="form-group">
               <label className="form-label">Category Name *</label>
               <input
                 type="text"
                 className="form-input"
+                style={getErrorStyle('name')}
                 value={categoryFormData.name}
-                onChange={(e) => setCategoryFormData({ name: e.target.value })}
+                onChange={(e) => {
+                  setCategoryFormData({ name: e.target.value })
+                  if (validationErrors.name) setValidationErrors({})
+                }}
                 placeholder="e.g., Frames, Materials, Tools"
                 required
               />
+              <FormValidation message={validationErrors.name} />
             </div>
             <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
               <button
@@ -471,17 +498,22 @@ const InventoryManagement = ({ inventory, onUpdateInventory }) => {
               <X size={20} />
             </button>
           </div>
-          <form onSubmit={handleSaveItem}>
+          <form noValidate onSubmit={handleSaveItem}>
             <div className="form-group">
               <label className="form-label">Item Name *</label>
               <input
                 type="text"
                 className="form-input"
+                style={getErrorStyle('name')}
                 value={itemFormData.name}
-                onChange={(e) => setItemFormData({ ...itemFormData, name: e.target.value })}
+                onChange={(e) => {
+                  setItemFormData({ ...itemFormData, name: e.target.value })
+                  if (validationErrors.name) setValidationErrors({})
+                }}
                 placeholder="e.g., 8x10 Frame, Glass Sheet"
                 required
               />
+              <FormValidation message={validationErrors.name} />
             </div>
             <div className="form-row" style={{ display: 'flex', gap: '1rem' }}>
               <div className="form-group" style={{ flex: 1 }}>
@@ -567,7 +599,7 @@ const InventoryManagement = ({ inventory, onUpdateInventory }) => {
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          {inventoryCategories.categories.map(category => {
+          {inventoryCategories.categories.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map(category => {
             const categoryItems = getCategoryItems(category.name)
             const isExpanded = expandedCategories[category.id]
 
@@ -709,6 +741,14 @@ const InventoryManagement = ({ inventory, onUpdateInventory }) => {
               </div>
             )
           })}
+          <Pagination
+            currentPage={currentPage}
+            totalPages={Math.ceil(inventoryCategories.categories.length / itemsPerPage)}
+            onPageChange={setCurrentPage}
+            totalItems={inventoryCategories.categories.length}
+            itemsPerPage={itemsPerPage}
+            onItemsPerPageChange={setItemsPerPage}
+          />
         </div>
       )}
       <ConfirmationModal

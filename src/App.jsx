@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import Sidebar from './components/Sidebar'
 import Dashboard from './components/Dashboard'
 import OrderManagement from './components/OrderManagement'
@@ -6,10 +6,10 @@ import Inventory from './components/Inventory'
 import ExpenseTracker from './components/ExpenseTracker'
 import Reports from './components/Reports'
 import Settings from './components/Settings'
-import Login from './components/Login'
-import { getOrders, getExpenses, getInventory, getSettings, getTrackingNumbers, getOrderCounter, getProducts, saveSettings, getQuotations } from './utils/storage'
-import { loadGoogleScript, initTokenClient, uploadFileToDrive } from './utils/googleDrive'
-import { supabase } from './utils/supabase'
+import Contact from './components/Contact'
+import Profile from './components/Profile'
+import ModeSelectionScreen from './components/ModeSelectionScreen'
+import { getOrders, getExpenses, getInventory, getProducts, getQuotations, getSettings } from './utils/storage'
 import { Loader2 } from 'lucide-react'
 
 import { ToastProvider } from './components/Toast/ToastContext'
@@ -17,15 +17,33 @@ import ToastContainer from './components/Toast/ToastContainer'
 import AutoBackupHandler from './components/AutoBackupHandler'
 import CurfoxAuthHandler from './components/CurfoxAuthHandler'
 import QuotationManagement from './components/QuotationManagement'
+import { ThemeProvider, useTheme } from './components/ThemeContext'
+import { LicensingProvider, useLicensing } from './components/LicensingContext'
+import { SyncProvider } from './components/SyncContext'
+import useKeyboardShortcuts from './hooks/useKeyboardShortcuts'
+import KeyboardShortcutsModal from './components/Common/KeyboardShortcutsModal'
+import ErrorBoundary from './components/ErrorBoundary'
+import HelpDocs from './components/HelpDocs'
+import TrialCountdownBar from './components/Common/TrialCountdownBar'
+import { useToast } from './components/Toast/ToastContext'
+import { useUpdateManager } from './hooks/useUpdateManager'
+import UpdateNotification from './components/UpdateNotification'
 
-function App() {
-  const [session, setSession] = useState(null)
-  const [authLoading, setAuthLoading] = useState(true)
+// Inner App component that uses licensing context
+function AppContent() {
+  const { userMode, isLoading: licensingLoading, resetSelection, isTrialActive, timeLeft } = useLicensing()
+  const { effectiveTheme } = useTheme()
+  const { addToast } = useToast()
+  const updateManager = useUpdateManager()
+  const [showUpdateToast, setShowUpdateToast] = useState(true)
+
+  // Local "session" for compatibility with components expecting it
+  const dummySession = { user: { id: 'local-user', email: 'local@app' } }
+
   const [dataLoading, setDataLoading] = useState(false)
   const [activeView, setActiveView] = useState(() => {
     const savedView = localStorage.getItem('aof_active_view')
-    // Validate if saved view is valid, otherwise default to dashboard
-    const validViews = ['dashboard', 'orders', 'inventory', 'expenses', 'reports', 'settings', 'quotations']
+    const validViews = ['dashboard', 'orders', 'inventory', 'expenses', 'quotations', 'reports', 'settings']
     return validViews.includes(savedView) ? savedView : 'dashboard'
   })
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -34,48 +52,36 @@ function App() {
   const [inventory, setInventory] = useState([])
   const [expenses, setExpenses] = useState([])
   const [products, setProducts] = useState({ categories: [] })
+  const [settings, setSettings] = useState(null)
+  const [prefilledOrder, setPrefilledOrder] = useState(null)
   const [triggerOrderForm, setTriggerOrderForm] = useState(0)
   const [triggerExpenseForm, setTriggerExpenseForm] = useState(0)
   const [initialFilters, setInitialFilters] = useState({})
+  const [showShortcuts, setShowShortcuts] = useState(false)
 
-  // Handle Authentication
+  // Load data - Unified for all modes
   useEffect(() => {
-    // Check active sessions and sets the session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-      setAuthLoading(false)
-    })
+    if (licensingLoading || !userMode) return
 
-    // Listen for changes on auth state (logged in, signed out, etc.)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      console.log(`App: Auth State Change Event: ${event}`)
-      setSession(session)
-      setAuthLoading(false)
-    })
-
-    return () => subscription.unsubscribe()
-  }, [])
-
-  // Load data from Supabase on mount or session change
-  useEffect(() => {
-    if (!session) return
     const loadData = async () => {
       console.log('App: Starting to load data...')
       setDataLoading(true)
       try {
-        const [ordersData, expensesData, inventoryData, productsData, quotationsData] = await Promise.all([
+        const [ordersData, expensesData, inventoryData, productsData, quotationsData, settingsData] = await Promise.all([
           getOrders(),
           getExpenses(),
           getInventory(),
           getProducts(),
-          getQuotations()
+          getQuotations(),
+          getSettings()
         ])
-        console.log(`App: Data loaded successfully. Orders: ${ordersData?.length}, Expenses: ${expensesData?.length}`)
-        setOrders(ordersData)
-        setExpenses(expensesData)
-        setInventory(inventoryData)
-        setProducts(productsData)
-        setQuotations(quotationsData)
+        console.log(`App: Data loaded successfully. Orders: ${ordersData?.length}`)
+        setOrders(ordersData || [])
+        setExpenses(expensesData || [])
+        setInventory(inventoryData || [])
+        setProducts(productsData || { categories: [] })
+        setQuotations(quotationsData || [])
+        setSettings(settingsData || null)
       } catch (error) {
         console.error('App: Error loading data:', error)
       } finally {
@@ -83,7 +89,8 @@ function App() {
       }
     }
     loadData()
-  }, [session?.user?.id]) // Use user ID for stability across token refreshes
+  }, [userMode, licensingLoading])
+
 
 
   // Persist active view to localStorage
@@ -91,10 +98,35 @@ function App() {
     localStorage.setItem('aof_active_view', activeView)
   }, [activeView])
 
-  // Live-sync: if Order Sources were renamed in Settings, update current in-memory orders immediately
+  // Trial Warning Logic (2x per day)
   useEffect(() => {
-    if (!session) return
+    if (!isTrialActive) return
 
+    const TRIAL_WARNINGS_KEY = 'aof_trial_warnings'
+    const today = new Date().toDateString()
+
+    try {
+      const warningsStr = localStorage.getItem(TRIAL_WARNINGS_KEY)
+      let warnings = warningsStr ? JSON.parse(warningsStr) : { date: today, count: 0 }
+
+      if (warnings.date !== today) {
+        warnings = { date: today, count: 0 }
+      }
+
+      if (warnings.count < 2) {
+        const daysLeft = Math.ceil(timeLeft / (24 * 60 * 60 * 1000))
+        addToast(`Enjoy Pro features! ${daysLeft} ${daysLeft === 1 ? 'day' : 'days'} left.`, 'info')
+
+        warnings.count += 1
+        localStorage.setItem(TRIAL_WARNINGS_KEY, JSON.stringify(warnings))
+      }
+    } catch (e) {
+      console.warn('Failed to show trial warning:', e)
+    }
+  }, [isTrialActive])
+
+  // Live-sync fallback for local events (e.g. from Settings)
+  useEffect(() => {
     const handler = (e) => {
       const detail = e?.detail
       if (detail?.type === 'orderSourceRenamed' && detail.oldName && detail.newName) {
@@ -103,40 +135,52 @@ function App() {
         ))
       }
     }
-    window.addEventListener('ordersUpdated', handler)
-    return () => window.removeEventListener('ordersUpdated', handler)
-  }, [session])
 
-  const handleLogout = async () => {
-    console.log('App: handleLogout called')
-    try {
-      const { error } = await supabase.auth.signOut()
-      if (error) throw error
-      console.log('App: Logout successful')
-    } catch (error) {
-      console.error('App: Logout error:', error)
+    // Global navigation handler
+    const navHandler = (e) => {
+      if (e.detail) {
+        if (typeof e.detail === 'string') {
+          setActiveView(e.detail);
+        } else if (e.detail.view) {
+          setActiveView(e.detail.view);
+          if (e.detail.section) {
+            setTimeout(() => {
+              const el = document.getElementById(e.detail.section);
+              if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 300); // 300ms delay to ensure view is mounted
+          }
+        }
+      }
     }
+
+    window.addEventListener('ordersUpdated', handler)
+    window.addEventListener('navigate-to-view', navHandler)
+
+    return () => {
+      window.removeEventListener('ordersUpdated', handler)
+      window.removeEventListener('navigate-to-view', navHandler)
+    }
+  }, [])
+
+  const handleLogout = () => {
+    // For local app, "Logout" means going back to Mode Selection
+    resetSelection()
   }
 
-  const updateOrders = (newOrders) => {
-    setOrders(newOrders)
+  const handleDataImported = (data) => {
+    setOrders(data.orders || [])
+    setExpenses(data.expenses || [])
+    setInventory(data.inventory || [])
   }
 
-  const updateExpenses = (newExpenses) => {
-    setExpenses(newExpenses)
-  }
-
-  const updateInventory = (newInventory) => {
-    setInventory(newInventory)
-  }
-
-  const updateQuotations = (newQuotations) => {
-    setQuotations(newQuotations)
-  }
+  const updateOrders = (newOrders) => setOrders(newOrders)
+  const updateExpenses = (newExpenses) => setExpenses(newExpenses)
+  const updateInventory = (newInventory) => setInventory(newInventory)
+  const updateQuotations = (newQuotations) => setQuotations(newQuotations)
+  const updateSettings = (newSettings) => setSettings(newSettings)
 
   const handleAddOrder = () => {
     setActiveView('orders')
-    // Use setTimeout to ensure view changes first, then trigger form
     setTimeout(() => {
       setTriggerOrderForm(prev => prev + 1)
     }, 0)
@@ -144,17 +188,16 @@ function App() {
 
   const handleAddExpense = () => {
     setActiveView('expenses')
-    // Use setTimeout to ensure view changes first, then trigger form
     setTimeout(() => {
       setTriggerExpenseForm(prev => prev + 1)
     }, 0)
   }
 
   const handleViewChange = (view) => {
-    // Reset form triggers when navigating via sidebar menu
     setTriggerOrderForm(0)
     setTriggerExpenseForm(0)
-    setInitialFilters({}) // Clear filters when navigating via sidebar
+    setInitialFilters({})
+    setPrefilledOrder(null)
     setActiveView(view)
   }
 
@@ -162,6 +205,72 @@ function App() {
     setInitialFilters(filters)
     setActiveView(view)
   }
+
+  // Keyboard shortcut handlers
+  const handleKeyboardNavigate = useCallback((target) => {
+    switch (target) {
+      case 'orders':
+        setActiveView('orders')
+        break
+      case 'inventory':
+        setActiveView('inventory')
+        break
+      case 'expenses':
+        setActiveView('expenses')
+        break
+      case 'quotations':
+        setActiveView('quotations')
+        break
+      case 'reports':
+        setActiveView('reports')
+        break
+      case 'settings':
+        setActiveView('settings')
+        break
+      case 'appearance':
+        setActiveView('settings')
+        // Scroll to appearance section after a short delay
+        setTimeout(() => {
+          const el = document.getElementById('appearance-section')
+          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        }, 100)
+        break
+      case 'support':
+        setActiveView('contact')
+        break
+      case 'help':
+        setActiveView('help')
+        break
+      case 'shortcuts':
+        setShowShortcuts(true)
+        break
+      default:
+        break
+    }
+  }, [])
+
+  const handleFocusSearch = useCallback(() => {
+    // Focus the first search input on the current page
+    const searchInput = document.querySelector('input[type="text"][placeholder*="Search"], input[type="search"]')
+    if (searchInput) {
+      searchInput.focus()
+      searchInput.select()
+    }
+  }, [])
+
+  const handleCloseModal = useCallback(() => {
+    setShowShortcuts(false)
+  }, [])
+
+  // Initialize keyboard shortcuts
+  useKeyboardShortcuts({
+    onNewOrder: handleAddOrder,
+    onNewExpense: handleAddExpense,
+    onNavigate: handleKeyboardNavigate,
+    onFocusSearch: handleFocusSearch,
+    onCloseModal: handleCloseModal,
+    enabled: userMode !== null // Only enable when user has selected a mode
+  })
 
   const renderView = () => {
     switch (activeView) {
@@ -182,6 +291,8 @@ function App() {
             onUpdateOrders={updateOrders}
             triggerFormOpen={triggerOrderForm}
             initialFilters={initialFilters}
+            prefilledOrder={prefilledOrder}
+            onClearPrefilled={() => setPrefilledOrder(null)}
           />
         )
       case 'inventory':
@@ -210,6 +321,11 @@ function App() {
             onUpdateQuotations={updateQuotations}
             orders={orders}
             onUpdateOrders={updateOrders}
+            onConvertToOrder={(orderData) => {
+              setPrefilledOrder(orderData)
+              setActiveView('orders')
+              setTriggerOrderForm(prev => prev + 1)
+            }}
           />
         )
       case 'reports':
@@ -227,25 +343,25 @@ function App() {
             orders={orders}
             expenses={expenses}
             inventory={inventory}
-            onDataImported={(data) => {
-              setOrders(data.orders || [])
-              setExpenses(data.expenses || [])
-              setInventory(data.inventory || [])
-            }}
-            onUpdateInventory={updateInventory}
-            onLogout={handleLogout}
+            onDataImported={handleDataImported}
+            onUpdateInventory={setInventory}
+            onLogout={resetSelection}
+            updateManager={updateManager}
           />
         )
+      case 'contact':
+        return <Contact />
+      case 'help':
+        return <HelpDocs />
+      case 'profile':
+        return <Profile onUpdateSettings={updateSettings} />
       default:
-        return <Dashboard orders={orders} expenses={expenses} inventory={inventory} products={products} onNavigate={navigateToView} />
+        return <Dashboard orders={orders} expenses={expenses} inventory={inventory} products={products} onNavigate={handleNavigate} />
     }
   }
 
-  // Only show the full-page loader if we haven't loaded any data yet.
-  // This prevents the entire app from unmounting and clearing forms during background refreshes.
-  const isInitialLoad = (authLoading || dataLoading) && orders.length === 0
-
-  if (isInitialLoad) {
+  // Show loading while determining licensing state
+  if (licensingLoading) {
     return (
       <div style={{
         height: '100vh',
@@ -257,7 +373,31 @@ function App() {
         color: 'var(--text-primary)',
         gap: '1rem'
       }}>
-        <div className="bg-blob bg-blob-3"></div>
+        <Loader2 className="animate-spin" size={32} />
+        <p>Loading application...</p>
+      </div>
+    )
+  }
+
+  // Show mode selection if no mode is chosen
+  if (!userMode) {
+    return <ModeSelectionScreen />
+  }
+
+  // Check if data is loading (initial load)
+  if (dataLoading && orders.length === 0 && expenses.length === 0) {
+    return (
+      <div style={{
+        height: '100vh',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'var(--bg-primary)',
+        color: 'var(--text-primary)',
+        gap: '1rem'
+      }}>
+
         <Loader2 size={48} className="animate-spin" style={{ color: 'var(--accent-primary)' }} />
         <p style={{
           fontSize: '1rem',
@@ -266,70 +406,92 @@ function App() {
           color: 'var(--text-secondary)',
           animation: 'pulse 2s infinite'
         }}>
-          {authLoading ? 'Verifying Session...' : 'Loading Data...'}
+          Loading Data...
         </p>
       </div>
     )
   }
 
-  if (!session) {
-    return (
-      <ToastProvider>
-        <ToastContainer />
-        <Login onLoginSuccess={(session) => setSession(session)} />
-      </ToastProvider>
-    )
-  }
-
+  // Main App Layout
   return (
-    <ToastProvider>
-      <div style={{ display: 'flex', minHeight: '100vh' }}>
-        <div className="bg-blob bg-blob-3"></div>
-        <ToastContainer />
-        <AutoBackupHandler session={session} dataLoading={dataLoading} />
-        <CurfoxAuthHandler session={session} />
-        <Sidebar
-          activeView={activeView}
-          setActiveView={handleViewChange}
-          sidebarOpen={sidebarOpen}
-          setSidebarOpen={setSidebarOpen}
-          onAddOrder={handleAddOrder}
-          onAddExpense={handleAddExpense}
-          onLogout={handleLogout}
-        />
-        <main style={{
-          flex: 1,
-          padding: '1rem',
-          marginLeft: '0',
-          backgroundColor: 'transparent',
-          transition: 'margin-left 0.3s ease',
-          minWidth: 0,
-          width: '100%',
-          boxSizing: 'border-box'
-        }}
-          className="main-content"
-        >
-          {renderView()}
-        </main>
-        {sidebarOpen && (
-          <div
-            style={{
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              backgroundColor: 'rgba(0, 0, 0, 0.5)',
-              zIndex: 99
-            }}
-            onClick={() => setSidebarOpen(false)}
-          />
-        )}
+    <div style={{ display: 'flex', minHeight: '100vh' }}>
+      <div className="app-background">
+        <div className="orb orb-1"></div>
+        <div className="orb orb-2"></div>
       </div>
-    </ToastProvider>
+      <ToastContainer />
+      <AutoBackupHandler session={dummySession} dataLoading={dataLoading} />
+      <CurfoxAuthHandler session={dummySession} />
+
+      {showShortcuts && (
+        <KeyboardShortcutsModal onClose={() => setShowShortcuts(false)} />
+      )}
+      {updateManager.status === 'ready' && showUpdateToast && (
+        <UpdateNotification
+          info={updateManager.updateInfo}
+          onInstall={updateManager.installUpdate}
+          onClose={() => setShowUpdateToast(false)}
+        />
+      )}
+
+      <Sidebar
+        activeView={activeView}
+        setActiveView={handleViewChange}
+        sidebarOpen={sidebarOpen}
+        setSidebarOpen={setSidebarOpen}
+        onAddOrder={handleAddOrder}
+        onAddExpense={handleAddExpense}
+        onLogout={handleLogout}
+        settings={settings}
+      />
+      <main style={{
+        flex: 1,
+        padding: '1rem',
+        marginLeft: '0',
+        backgroundColor: 'transparent',
+        transition: 'margin-left 0.3s ease',
+        minWidth: 0,
+        width: '100%',
+        boxSizing: 'border-box'
+      }}
+        className="main-content"
+      >
+        <TrialCountdownBar />
+        {renderView()}
+      </main>
+      {sidebarOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            zIndex: 99
+          }}
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+    </div>
+  )
+}
+
+// Main App component with providers
+function App() {
+  return (
+    <ThemeProvider>
+      <LicensingProvider>
+        <ToastProvider>
+          <SyncProvider>
+            <ErrorBoundary>
+              <AppContent />
+            </ErrorBoundary>
+          </SyncProvider>
+        </ToastProvider>
+      </LicensingProvider>
+    </ThemeProvider>
   )
 }
 
 export default App
-
-
